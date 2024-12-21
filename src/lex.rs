@@ -5,6 +5,7 @@ static KEYWORDS: phf::Map<&'static str, Token> = phf::phf_map! {
     "let" => Token::Let,
     "if" => Token::If,
     "else" => Token::Else,
+    "fn" => Token::Fn,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -13,6 +14,7 @@ pub enum Token {
     Let,
     If,
     Else,
+    Fn,
 
     // Literals
     Ident(String),    // x
@@ -21,9 +23,15 @@ pub enum Token {
     // Operators
     Assign, // =
     Eq,     // ==
+    Plus,   // +
+    Minus,  // -
+    Bang,   // !
+    Splat,  // *
+    Slash,  // /
 
     // Punctuation
     Semicolon,  // ;
+    Comma,      // ,
     OpenParen,  // (
     CloseParen, // )
     OpenBrace,  // {
@@ -95,8 +103,8 @@ impl<T: Iterator<Item = char>> Lexer<T> {
     }
 
     fn get_symbol(&mut self) -> Token {
-        match self.read().unwrap() {
-            '=' => {
+        match self.read(){
+            Some('=') => {
                 let c = self.peek();
                 if c == Some(&'=') {
                     self.read();
@@ -104,13 +112,20 @@ impl<T: Iterator<Item = char>> Lexer<T> {
                 } else {
                     Token::Assign
                 }
-            }
-            ';' => Token::Semicolon,
-            '(' => Token::OpenParen,
-            ')' => Token::CloseParen,
-            '{' => Token::OpenBrace,
-            '}' => Token::CloseBrace,
-            _ => Token::Error("unexpected character".to_string()),
+            },
+            Some('+') => Token::Plus,
+            Some('-') => Token::Minus,
+            Some('!') => Token::Bang,
+            Some('*') => Token::Splat,
+            Some('/') => Token::Slash,
+            Some(';') => Token::Semicolon,
+            Some(',') => Token::Comma,
+            Some('(') => Token::OpenParen,
+            Some(')') => Token::CloseParen,
+            Some('{') => Token::OpenBrace,
+            Some('}') => Token::CloseBrace,
+            Some(c) => Token::Error(format!("unexpected character: {} at position {}", c, self.pos)),
+            None => Token::Error(format!("unexpected end of input at position {}", self.pos)),
         }
     }
 }
@@ -274,10 +289,122 @@ pub mod tests {
         assert_eq!(lexer.next(), None);
     }
 
+    #[test]
+    fn it_parses_token_fn() {
+        let input = r#"fn add(a, b) { a + b }"#;
+        let mut lexer = Lexer::new(input.chars());
+
+        use Token::*;
+        test_tokens(vec![
+                (Fn, 2),
+                (Ident("add".to_string()), 6),
+                (OpenParen, 7),
+                (Ident("a".to_string()), 8),
+                (Comma, 9),
+                (Ident("b".to_string()), 11),
+                (CloseParen, 12),
+                (OpenBrace, 14),
+                (Ident("a".to_string()), 16),
+                (Plus, 18),
+                (Ident("b".to_string()), 20),
+                (CloseBrace, 22),
+            ],
+            &mut lexer,
+        );
+
+        assert_eq!(lexer.next(), None);
+    }
+
+    #[test]
+    fn it_parses_identifiers() {
+        let input = r#"abc _def GHI"#;
+        let mut lexer = Lexer::new(input.chars());
+
+        use Token::*;
+        test_tokens(
+            vec![
+                (Ident("abc".to_string()), 3),
+                (Ident("_def".to_string()), 8),
+                (Ident("GHI".to_string()), 12),
+            ],
+            &mut lexer,
+        );
+
+        assert_eq!(lexer.next(), None);
+    }
+
+    #[test]
+    fn it_parses_numbers() {
+        let input = r#"123 456 789"#;
+        let mut lexer = Lexer::new(input.chars());
+
+        use Token::*;
+        test_tokens(
+            vec![
+                (Int(123), 3),
+                (Int(456), 7),
+                (Int(789), 11),
+            ],
+            &mut lexer,
+        );
+
+        assert_eq!(lexer.next(), None);
+    }
+
+    #[test]
+    fn it_parses_keywords() {
+        let input = r#"let if else fn"#;
+        let mut lexer = Lexer::new(input.chars());
+
+        use Token::*;
+        test_tokens(
+            vec![
+                (Let, 3),
+                (If, 6),
+                (Else, 11),
+                (Fn, 14)
+            ],
+            &mut lexer,
+        );
+
+        assert_eq!(lexer.next(), None);
+    }
+
+    #[test]
+    fn it_parses_symbols() {
+        let input = r#"= == + - ! * / ; , ( ) { }"#;
+        let mut lexer = Lexer::new(input.chars());
+
+        use Token::*;
+        test_tokens(
+            vec![
+                (Assign, 1),
+                (Eq, 4),
+                (Plus, 6),
+                (Minus, 8),
+                (Bang, 10),
+                (Splat, 12),
+                (Slash, 14),
+                (Semicolon, 16),
+                (Comma, 18),
+                (OpenParen, 20),
+                (CloseParen, 22),
+                (OpenBrace, 24),
+                (CloseBrace, 26),
+            ],
+            &mut lexer,
+        );
+
+        assert_eq!(lexer.next(), None);
+    }
+
     // TODO: This would be better as a macro.
     fn test_tokens(expected: Vec<(Token, i32)>, lexer: &mut Lexer<impl Iterator<Item = char>>) {
         for (expected_token, expected_pos) in expected {
             let token = lexer.next();
+            if let Some(Token::Error(err)) = token {
+                panic!("Lexing encountered the following error: `{}`, expected: {:?}", err, expected_token);
+            }
             assert_eq!(
                 token,
                 Some(expected_token.clone()),
