@@ -1,0 +1,27 @@
+[workspace]
+resolver = "2"
+members = [
+    "stoplang_repl",
+]
+
+[workspace.package]
+authors = ["Joshua Willis"]
+description = "TODO"
+edition = "2021"
+license = "MIT"
+repository = "TODO"
+include = ["stoplang_repl"]
+version = "0.1.0"
+
+[package]
+name = "stoplang"
+authors.workspace = true
+description.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+phf = { version = "0.11.2", features = ["macros"] }
+
