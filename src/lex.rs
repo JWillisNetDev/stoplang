@@ -3,12 +3,16 @@ use std::iter::Peekable;
 
 static KEYWORDS: phf::Map<&'static str, Token> = phf::phf_map! {
     "let" => Token::Let,
+    "if" => Token::If,
+    "else" => Token::Else,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Token {
     // Keywords
-    Let, // let
+    Let,
+    If,
+    Else,
 
     // Literals
     Ident(String),    // x
@@ -16,22 +20,17 @@ pub enum Token {
 
     // Operators
     Assign, // =
+    Eq,     // ==
 
     // Punctuation
-    Semicolon, // ;
+    Semicolon,  // ;
+    OpenParen,  // (
+    CloseParen, // )
+    OpenBrace,  // {
+    CloseBrace, // }
 
     // Special
     Error(String),
-}
-
-impl Token {
-    fn token_from_symbol(c: char) -> Token {
-        match c {
-            '=' => Token::Assign,
-            ';' => Token::Semicolon,
-            _ => Token::Error(format!("unexpected character: {}", c)),
-        }
-    }
 }
 
 pub struct Lexer<T: Iterator<Item = char>> {
@@ -94,6 +93,26 @@ impl<T: Iterator<Item = char>> Lexer<T> {
         }
         number.parse::<StopInteger>().unwrap()
     }
+
+    fn get_symbol(&mut self) -> Token {
+        match self.read().unwrap() {
+            '=' => {
+                let c = self.peek();
+                if c == Some(&'=') {
+                    self.read();
+                    Token::Eq
+                } else {
+                    Token::Assign
+                }
+            }
+            ';' => Token::Semicolon,
+            '(' => Token::OpenParen,
+            ')' => Token::CloseParen,
+            '{' => Token::OpenBrace,
+            '}' => Token::CloseBrace,
+            _ => Token::Error("unexpected character".to_string()),
+        }
+    }
 }
 
 fn is_identifier_char(c: char) -> bool {
@@ -125,8 +144,7 @@ impl<T: Iterator<Item = char>> Iterator for Lexer<T> {
             let number = self.get_number();
             Some(Token::Int(number))
         } else {
-            self.read();
-            Some(Token::token_from_symbol(next))
+            Some(self.get_symbol())
         }
     }
 }
@@ -226,6 +244,37 @@ pub mod tests {
         assert_eq!(lexer.next(), None);
     }
 
+    #[test]
+    fn it_parses_token_if_else() {
+        let input = r#"let x = if a == b { 1 } else { 2 };"#;
+        let mut lexer = Lexer::new(input.chars());
+
+        use Token::*;
+        test_tokens(
+            vec![
+                (Let, 3),
+                (Ident("x".to_string()), 5),
+                (Assign, 7),
+                (If, 10),
+                (Ident("a".to_string()), 12),
+                (Eq, 15),
+                (Ident("b".to_string()), 17),
+                (OpenBrace, 19),
+                (Int(1), 21),
+                (CloseBrace, 23),
+                (Else, 28),
+                (OpenBrace, 30),
+                (Int(2), 32),
+                (CloseBrace, 34),
+                (Semicolon, 35),
+            ],
+            &mut lexer,
+        );
+
+        assert_eq!(lexer.next(), None);
+    }
+
+    // TODO: This would be better as a macro.
     fn test_tokens(expected: Vec<(Token, i32)>, lexer: &mut Lexer<impl Iterator<Item = char>>) {
         for (expected_token, expected_pos) in expected {
             let token = lexer.next();
