@@ -1,4 +1,4 @@
-use crate::StopInteger;
+use crate::StopIdentifier;
 use std::iter::Peekable;
 
 static KEYWORDS: phf::Map<&'static str, Token> = phf::phf_map! {
@@ -17,8 +17,8 @@ pub enum Token {
     Fn,
 
     // Literals
-    Ident(String),    // x
-    Int(StopInteger), // 123
+    Ident(StopIdentifier), // x
+    Int(StopIdentifier),   // 123
 
     // Operators
     Assign, // =
@@ -89,7 +89,7 @@ impl<T: Iterator<Item = char>> Lexer<T> {
         return identifier;
     }
 
-    fn get_number(&mut self) -> StopInteger {
+    fn get_number(&mut self) -> String {
         let mut number = String::from(self.read().unwrap());
         while let Some(&c) = self.peek() {
             if is_number_char(c) {
@@ -99,11 +99,11 @@ impl<T: Iterator<Item = char>> Lexer<T> {
                 break;
             }
         }
-        number.parse::<StopInteger>().unwrap()
+        number
     }
 
     fn get_symbol(&mut self) -> Token {
-        match self.read(){
+        match self.read() {
             Some('=') => {
                 let c = self.peek();
                 if c == Some(&'=') {
@@ -112,7 +112,7 @@ impl<T: Iterator<Item = char>> Lexer<T> {
                 } else {
                     Token::Assign
                 }
-            },
+            }
             Some('+') => Token::Plus,
             Some('-') => Token::Minus,
             Some('!') => Token::Bang,
@@ -124,7 +124,10 @@ impl<T: Iterator<Item = char>> Lexer<T> {
             Some(')') => Token::CloseParen,
             Some('{') => Token::OpenBrace,
             Some('}') => Token::CloseBrace,
-            Some(c) => Token::Error(format!("unexpected character: {} at position {}", c, self.pos)),
+            Some(c) => Token::Error(format!(
+                "unexpected character: {} at position {}",
+                c, self.pos
+            )),
             None => Token::Error(format!("unexpected end of input at position {}", self.pos)),
         }
     }
@@ -250,7 +253,7 @@ pub mod tests {
                 (Let, 3),
                 (Ident("x".to_string()), 5),
                 (Assign, 7),
-                (Int(5), 9),
+                (Int("5".to_string()), 9),
                 (Semicolon, 10),
             ],
             &mut lexer,
@@ -275,11 +278,11 @@ pub mod tests {
                 (Eq, 15),
                 (Ident("b".to_string()), 17),
                 (OpenBrace, 19),
-                (Int(1), 21),
+                (Int("1".to_string()), 21),
                 (CloseBrace, 23),
                 (Else, 28),
                 (OpenBrace, 30),
-                (Int(2), 32),
+                (Int("2".to_string()), 32),
                 (CloseBrace, 34),
                 (Semicolon, 35),
             ],
@@ -295,7 +298,8 @@ pub mod tests {
         let mut lexer = Lexer::new(input.chars());
 
         use Token::*;
-        test_tokens(vec![
+        test_tokens(
+            vec![
                 (Fn, 2),
                 (Ident("add".to_string()), 6),
                 (OpenParen, 7),
@@ -341,9 +345,9 @@ pub mod tests {
         use Token::*;
         test_tokens(
             vec![
-                (Int(123), 3),
-                (Int(456), 7),
-                (Int(789), 11),
+                (Int("123".to_string()), 3),
+                (Int("456".to_string()), 7),
+                (Int("789".to_string()), 11),
             ],
             &mut lexer,
         );
@@ -357,15 +361,7 @@ pub mod tests {
         let mut lexer = Lexer::new(input.chars());
 
         use Token::*;
-        test_tokens(
-            vec![
-                (Let, 3),
-                (If, 6),
-                (Else, 11),
-                (Fn, 14)
-            ],
-            &mut lexer,
-        );
+        test_tokens(vec![(Let, 3), (If, 6), (Else, 11), (Fn, 14)], &mut lexer);
 
         assert_eq!(lexer.next(), None);
     }
@@ -403,7 +399,10 @@ pub mod tests {
         for (expected_token, expected_pos) in expected {
             let token = lexer.next();
             if let Some(Token::Error(err)) = token {
-                panic!("Lexing encountered the following error: `{}`, expected: {:?}", err, expected_token);
+                panic!(
+                    "Lexing encountered the following error: `{}`, expected: {:?}",
+                    err, expected_token
+                );
             }
             assert_eq!(
                 token,
