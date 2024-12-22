@@ -6,6 +6,7 @@ static KEYWORDS: phf::Map<&'static str, Token> = phf::phf_map! {
     "if" => Token::If,
     "else" => Token::Else,
     "fn" => Token::Fn,
+    "return" => Token::Return,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -15,19 +16,25 @@ pub enum Token {
     If,
     Else,
     Fn,
+    Return,
 
     // Literals
     Ident(StopIdentifier), // x
     Int(StopIdentifier),   // 123
 
     // Operators
-    Assign, // =
-    Eq,     // ==
-    Plus,   // +
-    Minus,  // -
-    Bang,   // !
-    Splat,  // *
-    Slash,  // /
+    Assign,        // =
+    Eq,            // ==
+    Neq,           // !=
+    Plus,          // +
+    Minus,         // -
+    Bang,          // !
+    Splat,         // *
+    Slash,         // /
+    LessThan,      // <
+    LessThanEq,    // <=
+    GreaterThan,   // >
+    GreaterThanEq, // >=
 
     // Punctuation
     Semicolon,  // ;
@@ -115,9 +122,35 @@ impl<T: Iterator<Item = char>> Lexer<T> {
             }
             Some('+') => Token::Plus,
             Some('-') => Token::Minus,
-            Some('!') => Token::Bang,
+            Some('!') => {
+                let c = self.peek();
+                if c == Some(&'=') {
+                    self.read();
+                    Token::Neq
+                } else {
+                    Token::Bang
+                }
+            }
             Some('*') => Token::Splat,
             Some('/') => Token::Slash,
+            Some('<') => {
+                let c = self.peek();
+                if let Some('=') = c {
+                    self.read();
+                    Token::LessThanEq
+                } else {
+                    Token::LessThan
+                }
+            }
+            Some('>') => {
+                let c = self.peek();
+                if let Some('=') = c {
+                    self.read();
+                    Token::GreaterThanEq
+                } else {
+                    Token::GreaterThan
+                }
+            }
             Some(';') => Token::Semicolon,
             Some(',') => Token::Comma,
             Some('(') => Token::OpenParen,
@@ -357,18 +390,21 @@ pub mod tests {
 
     #[test]
     fn it_parses_keywords() {
-        let input = r#"let if else fn"#;
+        let input = r#"let if else fn return"#;
         let mut lexer = Lexer::new(input.chars());
 
         use Token::*;
-        test_tokens(vec![(Let, 3), (If, 6), (Else, 11), (Fn, 14)], &mut lexer);
+        test_tokens(
+            vec![(Let, 3), (If, 6), (Else, 11), (Fn, 14), (Return, 21)],
+            &mut lexer,
+        );
 
         assert_eq!(lexer.next(), None);
     }
 
     #[test]
     fn it_parses_symbols() {
-        let input = r#"= == + - ! * / ; , ( ) { }"#;
+        let input = r#"= == + - ! * / ; , ( ) { } != > >= < <="#;
         let mut lexer = Lexer::new(input.chars());
 
         use Token::*;
@@ -387,6 +423,11 @@ pub mod tests {
                 (CloseParen, 22),
                 (OpenBrace, 24),
                 (CloseBrace, 26),
+                (Neq, 29),
+                (LessThan, 31),
+                (LessThanEq, 34),
+                (GreaterThan, 36),
+                (GreaterThanEq, 39),
             ],
             &mut lexer,
         );
