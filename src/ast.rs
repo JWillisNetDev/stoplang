@@ -1,6 +1,6 @@
 use std::fmt::Write;
 
-use crate::{lex::Operator, StopIdentifier, StopInteger};
+use crate::{lex::Operator, StopRawLiteral, StopInteger};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Program {
@@ -32,7 +32,7 @@ impl std::fmt::Display for Program {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Statement {
     LetStatement {
-        name: StopIdentifier,
+        name: StopRawLiteral,
         value: Expression,
     },
     ReturnStatement {
@@ -67,7 +67,7 @@ impl std::fmt::Display for Statement {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Expression {
-    IdentifierLiteral(StopIdentifier),
+    IdentifierLiteral(StopRawLiteral),
     IntegerLiteral(StopInteger),
     PrefixExpression {
         op: Operator,

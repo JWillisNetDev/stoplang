@@ -1,7 +1,7 @@
 use crate::{
     ast::{Expression, Program, Statement},
     lex::*,
-    StopIdentifier,
+    StopRawLiteral,
 };
 use std::iter::Peekable;
 
@@ -38,7 +38,7 @@ impl<T: Iterator<Item = Token>> Parser<T> {
         self.inner.peek()
     }
 
-    fn expect_identifier(&mut self) -> Result<StopIdentifier, ParserError> {
+    fn expect_identifier(&mut self) -> Result<StopRawLiteral, ParserError> {
         let token = self.read();
         match token {
             Some(Token::Ident(ident)) => Ok(ident),

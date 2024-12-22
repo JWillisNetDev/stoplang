@@ -1,4 +1,4 @@
-use crate::StopIdentifier;
+use crate::StopRawLiteral;
 use std::iter::Peekable;
 
 static KEYWORDS: phf::Map<&'static str, Token> = phf::phf_map! {
@@ -55,8 +55,8 @@ pub enum Token {
     Return,
 
     // Literals
-    Ident(StopIdentifier),
-    Int(StopIdentifier),
+    Ident(StopRawLiteral),
+    Int(StopRawLiteral),
 
     // Operators
     Op(Operator),
