@@ -19,6 +19,9 @@ pub enum Statement {
         name: StopIdentifier,
         value: Expression,
     },
+    ReturnStatement {
+        value: Expression,
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]

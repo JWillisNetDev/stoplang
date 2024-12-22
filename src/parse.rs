@@ -116,9 +116,7 @@ impl<T: Iterator<Item = Token>> Parser<T> {
 
     fn parse_let_statement(&mut self) -> Result<Statement, ParserError> {
         // let <identifier> = <expression>;
-
         let name = self.expect_identifier()?;
-
         self.expect_token(Token::Assign)?;
 
         // TODO Expressions
@@ -135,7 +133,8 @@ impl<T: Iterator<Item = Token>> Parser<T> {
     }
 
     fn parse_program(&mut self) -> Result<Program, ParserError> {
-        
+        let statements = self.collect::<Result<Vec<_>, _>>()?;
+        Ok(Program::new(statements))
     }
 }
 
@@ -160,6 +159,25 @@ mod tests {
         let lexer = Lexer::new(input.chars());
         let mut parser = Parser::new(lexer);
 
+        let program = parser.create_program();
+        if let Err(err) = program {
+            panic!("failed to parse program: {}", err);
+        }
+
+        let statements = program.unwrap().statements;
+        assert_eq!(1, statements.len());
+
+        let statement = &statements[0];
+        let name = assert_matches!(
+            statement,
+            Statement::LetStatement {
+                name,
+                value: Expression::IntegerLiteral(5),
+            } => name.clone()
+        );
+
+        assert_eq!("x".to_string(), name);
+
         let actual = parser.next();
         let actual_name = assert_matches!(actual,
             Some(Ok(Statement::LetStatement {
@@ -167,5 +185,28 @@ mod tests {
                 value: Expression::IntegerLiteral(3),
             })) => name);
         assert_eq!("x".to_string(), actual_name);
+    }
+
+    #[test]
+    fn it_parses_return_statement() {
+        let input = "return 5;";
+        let lexer = Lexer::new(input.chars());
+        let mut parser = Parser::new(lexer);
+
+        let program = parser.create_program();
+        if let Err(err) = program {
+            panic!("failed to parse program: {}", err);
+        }
+
+        let statements = program.unwrap().statements;
+        assert_eq!(1, statements.len());
+
+        let statement = &statements[0];
+        assert_matches!(
+            statement,
+            Statement::ReturnStatement {
+                value: Expression::IntegerLiteral(5),
+            }
+        );
     }
 }
