@@ -1,66 +1,20 @@
 use crate::{
     ast::{Expression, Program, Statement},
     lex::*,
-    StopIdentifier, StopInteger,
+    StopIdentifier,
 };
-use assert_matches::assert_matches;
-use phf::phf_map;
-use std::{fmt::format, iter::Peekable};
+use std::iter::Peekable;
 
 pub type ParserError = String;
 
 pub struct Parser<T: Iterator<Item = Token>> {
     inner: Peekable<T>,
-    peek_lazy: Option<Token>,
-}
-
-type PrefixParser = fn(Token) -> Result<Expression, ParserError>;
-type InfixParser = fn(Expression, Token) -> Result<Expression, ParserError>;
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum Precedence {
-    Lowest = 0,
-    Eq = 1,
-    LessGreater = 2,
-    Sum = 3,
-    Product = 4,
-    Call = 5,
-}
-
-fn get_precedence(token: Token) -> Precedence {
-    match token {
-        Token::Eq | Token::Neq => Precedence::Eq,
-        Token::LessThan | Token::LessThanEq | Token::GreaterThan | Token::GreaterThanEq => {
-            Precedence::LessGreater
-        }
-        Token::Plus | Token::Minus => Precedence::Sum,
-        Token::Splat | Token::Slash => Precedence::Product,
-        Token::OpenParen => Precedence::Call,
-        _ => Precedence::Lowest,
-    }
-}
-
-fn get_prefix_parser(
-    token: Token,
-) -> Option<Box<dyn FnOnce(Token) -> Result<Expression, ParserError>>> {
-    match token {
-        Token::Ident(ident) => Some(Box::new(move |_| Ok(Expression::IdentifierLiteral(ident)))),
-        Token::Int(i) => Some(Box::new(move |_| {
-            let parsed = i.parse::<StopInteger>();
-            match parsed {
-                Ok(i) => Ok(Expression::IntegerLiteral(i)),
-                Err(err) => Err(format!("failed to parse integer: {}", err)),
-            }
-        })),
-        _ => todo!(),
-    }
 }
 
 impl<T: Iterator<Item = Token>> Parser<T> {
     pub fn new(inner: T) -> Self {
         Parser {
             inner: inner.peekable(),
-            peek_lazy: None,
         }
     }
 
@@ -97,27 +51,15 @@ impl<T: Iterator<Item = Token>> Parser<T> {
         let token = self.read();
         match token {
             Some(token) if token == expected => Ok(token),
-            Some(token) => Err(format!("expected {:?}, got {:?}", expected, token)),
+            Some(token) => Err(format!("expected token {:?}, got {:?}", expected, token)),
             None => Err(format!("expected {:?}, got end of input", expected)),
         }
-    }
-
-    fn parse_expression(&mut self, precedence: Precedence) -> Result<Expression, ParserError> {
-        todo!()
-    }
-
-    fn parse_prefix(&mut self, token: Token) -> Result<Expression, ParserError> {
-        todo!()
-    }
-
-    fn parse_prefix_expr(&mut self) -> Result<Expression, ParserError> {
-        todo!()
     }
 
     fn parse_let_statement(&mut self) -> Result<Statement, ParserError> {
         // let <identifier> = <expression>;
         let name = self.expect_identifier()?;
-        self.expect_token(Token::Assign)?;
+        self.expect_token(Token::Op(Operator::Assign))?;
 
         // TODO Expressions
         while self.peek() != Some(&Token::Semicolon) {
@@ -132,7 +74,7 @@ impl<T: Iterator<Item = Token>> Parser<T> {
         })
     }
 
-    fn parse_program(&mut self) -> Result<Program, ParserError> {
+    pub fn parse_program(&mut self) -> Result<Program, ParserError> {
         let statements = self.collect::<Result<Vec<_>, _>>()?;
         Ok(Program::new(statements))
     }
@@ -151,6 +93,8 @@ impl<T: Iterator<Item = Token>> Iterator for Parser<T> {
 
 #[cfg(test)]
 mod tests {
+    use assert_matches::assert_matches;
+
     use super::*;
 
     #[test]

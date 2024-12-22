@@ -9,6 +9,42 @@ static KEYWORDS: phf::Map<&'static str, Token> = phf::phf_map! {
     "return" => Token::Return,
 };
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Operator {
+    Assign,
+    Eq,
+    Neq,
+    Plus,
+    Minus,
+    Bang,
+    Splat,
+    Slash,
+    LessThan,
+    LessThanEq,
+    GreaterThan,
+    GreaterThanEq,
+}
+
+impl Into<&str> for Operator {
+    fn into(self) -> &'static str {
+        use Operator::*;
+        match self {
+            Assign => "=",
+            Eq => "==",
+            Neq => "!=",
+            Plus => "+",
+            Minus => "-",
+            Bang => "!",
+            Splat => "*",
+            Slash => "/",
+            LessThan => "<",
+            LessThanEq => "<=",
+            GreaterThan => ">",
+            GreaterThanEq => ">=",
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Token {
     // Keywords
@@ -19,30 +55,19 @@ pub enum Token {
     Return,
 
     // Literals
-    Ident(StopIdentifier), // x
-    Int(StopIdentifier),   // 123
+    Ident(StopIdentifier),
+    Int(StopIdentifier),
 
     // Operators
-    Assign,        // =
-    Eq,            // ==
-    Neq,           // !=
-    Plus,          // +
-    Minus,         // -
-    Bang,          // !
-    Splat,         // *
-    Slash,         // /
-    LessThan,      // <
-    LessThanEq,    // <=
-    GreaterThan,   // >
-    GreaterThanEq, // >=
+    Op(Operator),
 
     // Punctuation
-    Semicolon,  // ;
-    Comma,      // ,
-    OpenParen,  // (
-    CloseParen, // )
-    OpenBrace,  // {
-    CloseBrace, // }
+    Semicolon,
+    Comma,
+    OpenParen,
+    CloseParen,
+    OpenBrace,
+    CloseBrace,
 
     // Special
     Error(String),
@@ -115,40 +140,40 @@ impl<T: Iterator<Item = char>> Lexer<T> {
                 let c = self.peek();
                 if c == Some(&'=') {
                     self.read();
-                    Token::Eq
+                    Token::Op(Operator::Eq)
                 } else {
-                    Token::Assign
+                    Token::Op(Operator::Assign)
                 }
             }
-            Some('+') => Token::Plus,
-            Some('-') => Token::Minus,
+            Some('+') => Token::Op(Operator::Plus),
+            Some('-') => Token::Op(Operator::Minus),
             Some('!') => {
                 let c = self.peek();
                 if c == Some(&'=') {
                     self.read();
-                    Token::Neq
+                    Token::Op(Operator::Neq)
                 } else {
-                    Token::Bang
+                    Token::Op(Operator::Bang)
                 }
             }
-            Some('*') => Token::Splat,
-            Some('/') => Token::Slash,
+            Some('*') => Token::Op(Operator::Splat),
+            Some('/') => Token::Op(Operator::Slash),
             Some('<') => {
                 let c = self.peek();
                 if let Some('=') = c {
                     self.read();
-                    Token::LessThanEq
+                    Token::Op(Operator::LessThanEq)
                 } else {
-                    Token::LessThan
+                    Token::Op(Operator::LessThan)
                 }
             }
             Some('>') => {
                 let c = self.peek();
                 if let Some('=') = c {
                     self.read();
-                    Token::GreaterThanEq
+                    Token::Op(Operator::GreaterThanEq)
                 } else {
-                    Token::GreaterThan
+                    Token::Op(Operator::GreaterThan)
                 }
             }
             Some(';') => Token::Semicolon,
@@ -285,7 +310,7 @@ pub mod tests {
             vec![
                 (Let, 3),
                 (Ident("x".to_string()), 5),
-                (Assign, 7),
+                (Op(Operator::Assign), 7),
                 (Int("5".to_string()), 9),
                 (Semicolon, 10),
             ],
@@ -305,10 +330,10 @@ pub mod tests {
             vec![
                 (Let, 3),
                 (Ident("x".to_string()), 5),
-                (Assign, 7),
+                (Op(Operator::Assign), 7),
                 (If, 10),
                 (Ident("a".to_string()), 12),
-                (Eq, 15),
+                (Op(Operator::Eq), 15),
                 (Ident("b".to_string()), 17),
                 (OpenBrace, 19),
                 (Int("1".to_string()), 21),
@@ -342,7 +367,7 @@ pub mod tests {
                 (CloseParen, 12),
                 (OpenBrace, 14),
                 (Ident("a".to_string()), 16),
-                (Plus, 18),
+                (Op(Operator::Plus), 18),
                 (Ident("b".to_string()), 20),
                 (CloseBrace, 22),
             ],
@@ -403,31 +428,46 @@ pub mod tests {
     }
 
     #[test]
+    fn it_parses_operators() {
+        let input = r#"= == + - ! * / != > >= < <="#;
+        let mut lexer = Lexer::new(input.chars());
+
+        use Token::*;
+        use Operator::*;
+        test_tokens(
+            vec![
+                (Op(Assign), 1),
+                (Op(Eq), 4),
+                (Op(Plus), 6),
+                (Op(Minus), 8),
+                (Op(Bang), 10),
+                (Op(Splat), 12),
+                (Op(Slash), 14),
+                (Op(Neq), 17),
+                (Op(GreaterThan), 19),
+                (Op(GreaterThanEq), 22),
+                (Op(LessThan), 24),
+                (Op(LessThanEq), 27),
+            ],
+            &mut lexer,);
+        
+        assert_eq!(None, lexer.next());
+    }
+
+    #[test]
     fn it_parses_symbols() {
-        let input = r#"= == + - ! * / ; , ( ) { } != > >= < <="#;
+        let input = r#"; , ( ) { }"#;
         let mut lexer = Lexer::new(input.chars());
 
         use Token::*;
         test_tokens(
             vec![
-                (Assign, 1),
-                (Eq, 4),
-                (Plus, 6),
-                (Minus, 8),
-                (Bang, 10),
-                (Splat, 12),
-                (Slash, 14),
-                (Semicolon, 16),
-                (Comma, 18),
-                (OpenParen, 20),
-                (CloseParen, 22),
-                (OpenBrace, 24),
-                (CloseBrace, 26),
-                (Neq, 29),
-                (GreaterThan, 31),
-                (GreaterThanEq, 34),
-                (LessThan, 36),
-                (LessThanEq, 39),
+                (Semicolon, 1),
+                (Comma, 3),
+                (OpenParen, 5),
+                (CloseParen, 7),
+                (OpenBrace, 9),
+                (CloseBrace, 11),
             ],
             &mut lexer,
         );
