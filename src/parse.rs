@@ -62,8 +62,8 @@ impl<T: Iterator<Item = Token>> Parser<T> {
         self.expect_token(Token::Semicolon)?;
 
         Ok(Statement::LetStatement {
-            name,
-            value: Expression::IntegerLiteral(3),
+            ident: name,
+            expr: Expression::IntegerLiteral(3),
         })
     }
 
@@ -78,7 +78,7 @@ impl<T: Iterator<Item = Token>> Parser<T> {
         self.expect_token(Token::Semicolon)?;
 
         Ok(Statement::ReturnStatement {
-            value: Expression::IntegerLiteral(3),
+            expr: Expression::IntegerLiteral(3),
         })
     }
 }
@@ -117,15 +117,15 @@ mod tests {
         assert_eq!(1, statements.len());
 
         let statement = &statements[0];
-        let name = assert_matches!(
+        let ident = assert_matches!(
             statement,
             Statement::LetStatement {
-                name,
+                ident,
                 .. // value: Expression::IntegerLiteral(5),
-            } => name.clone()
+            } => ident.clone()
         );
 
-        assert_eq!("x".to_string(), name);
+        assert_eq!("x".to_string(), ident);
     }
 
     #[test]
