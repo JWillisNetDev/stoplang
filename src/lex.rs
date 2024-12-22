@@ -24,7 +24,7 @@ pub enum Operator {
     GreaterThan,
     GreaterThanEq,
 }
-
+#[allow(clippy::from_over_into)] // We don't want From<&str> because it would not have any use.
 impl Into<&str> for Operator {
     fn into(self) -> &'static str {
         use Operator::*;
@@ -118,7 +118,7 @@ impl<T: Iterator<Item = char>> Lexer<T> {
                 break;
             }
         }
-        return identifier;
+        identifier
     }
 
     fn get_number(&mut self) -> String {
@@ -192,11 +192,11 @@ impl<T: Iterator<Item = char>> Lexer<T> {
 }
 
 fn is_identifier_char(c: char) -> bool {
-    (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_'
+    c.is_ascii_alphabetic() || c == '_'
 }
 
 fn is_number_char(c: char) -> bool {
-    c >= '0' && c <= '9'
+    c.is_ascii_digit()
 }
 
 impl<T: Iterator<Item = char>> Iterator for Lexer<T> {
