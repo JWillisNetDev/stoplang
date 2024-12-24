@@ -226,4 +226,26 @@ mod tests {
             program.to_string(),
         );
     }
+
+    #[test]
+    fn it_displays_expressions() {
+        let expected = "(5 + (10 * 2))";
+
+        test_expression(
+            Expression::InfixExpression {
+                left: Box::new(Expression::IntegerLiteral(5)),
+                op: Operator::Plus,
+                right: Box::new(Expression::InfixExpression {
+                    left: Box::new(Expression::IntegerLiteral(10)),
+                    op: Operator::Splat,
+                    right: Box::new(Expression::IntegerLiteral(2)),
+                }),
+            },
+            expected);
+    }
+
+    fn test_expression(input: Expression, expected: &str)
+    {
+        assert_eq!(expected, input.to_string());
+    }
 }
