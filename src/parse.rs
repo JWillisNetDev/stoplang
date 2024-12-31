@@ -161,7 +161,10 @@ impl<T: Iterator<Item = Token>> Parser<T> {
     }
 
     fn parse_infix(&mut self, left: Expression) -> ParseResult<Expression> {
-        let token = self.read().ok_or("expected an infix operator, found nothing")?;
+        let token = self
+            .read()
+            .ok_or("expected an infix operator, found nothing")?;
+
         let op = match token {
             Token::Op(op) if is_infix(&token) => op,
             _ => {
@@ -172,12 +175,10 @@ impl<T: Iterator<Item = Token>> Parser<T> {
             }
         };
 
-        let next_token = self.read().ok_or_else(|| {
-            format!(
-                "expected an expression following infix operator {}, found nothing",
-                <Operator as Into<&str>>::into(op)
-            )
-        })?;
+        let next_token = self.read().ok_or(format!(
+            "expected an expression following infix operator {}, found nothing",
+            <Operator as Into<&str>>::into(op)
+        ))?;
 
         let right = Box::new(self.parse_expression(&next_token, Precedence::of(&token))?);
         Ok(Expression::InfixExpression {
@@ -197,14 +198,13 @@ impl<T: Iterator<Item = Token>> Parser<T> {
         if let Some(mut next) = self.peek() {
             while next != &Token::Semicolon && precedence < Precedence::of(next) && is_infix(next) {
                 expr = self.parse_infix(expr)?;
-                self.read();
                 next = match self.peek() {
                     Some(token) => token,
                     None => break,
                 };
             }
         }
-        
+
         Ok(expr)
     }
 
@@ -485,6 +485,34 @@ mod tests {
                 ),
             ],
         );
+        Ok(())
+    }
+
+    #[test]
+    fn it_parses_by_precedence() -> TestResult {
+        // ((4 * 5) + 3);
+        let input = vec![
+            Token::Int("4".to_string()),
+            Token::Op(Operator::Splat),
+            Token::Int("5".to_string()),
+            Token::Op(Operator::Plus),
+            Token::Int("3".to_string()),
+            Token::Semicolon,
+        ];
+
+        let mut parser = Parser::new(input.into_iter());
+        let program = parser.parse_program()?;
+        let program = program.statements[0].to_string();
+        assert_eq!("((4 * 5) + 3);", program);
+
+        // TODO: Clean this up, make more consistent
+        // Consider a macro for this
+        let input = "3 + 4 * 5 == 3 * 1 + 4 * 5";
+        let lexer = Lexer::new(input.chars());
+        let mut parser = Parser::new(lexer);
+        let program = parser.parse_program()?;
+        let program = program.statements[0].to_string();
+        assert_eq!("((3 + (4 * 5)) == ((3 * 1) + (4 * 5)));", program);
 
         Ok(())
     }
