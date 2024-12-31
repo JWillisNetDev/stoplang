@@ -34,7 +34,7 @@ fn is_infix(token: &Token) -> bool {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Precedence {
+enum Precedence {
     Lowest = 1,
     Equals = 2,
     LessGreater = 3,
@@ -234,6 +234,7 @@ impl<T: Iterator<Item = Token>> Iterator for Parser<T> {
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use assert_matches::assert_matches;
 
@@ -490,7 +491,8 @@ mod tests {
 
     #[test]
     fn it_parses_by_precedence() -> TestResult {
-        // ((4 * 5) + 3);
+        // 4 * 5 + 3;
+        // ((4 * 5) + 3)
         let input = vec![
             Token::Int("4".to_string()),
             Token::Op(Operator::Splat),
@@ -502,17 +504,95 @@ mod tests {
 
         let mut parser = Parser::new(input.into_iter());
         let program = parser.parse_program()?;
-        let program = program.statements[0].to_string();
-        assert_eq!("((4 * 5) + 3);", program);
+        assert_eq!(1, program.statements.len());
+        let statement = &program.statements[0];
+        assert_matches!(
+            statement,
+            Statement::ExpressionStatement {
+                expr: Expression::InfixExpression {
+                    // 4 * 5
+                    left: box Expression::InfixExpression {
+                        left: box Expression::IntegerLiteral(4),
+                        op: Operator::Splat,
+                        right: box Expression::IntegerLiteral(5),
+                    },
+                    op: Operator::Plus,
+                    right: box Expression::IntegerLiteral(3),
+                }
+            }
+        );
 
-        // TODO: Clean this up, make more consistent
-        // Consider a macro for this
-        let input = "3 + 4 * 5 == 3 * 1 + 4 * 5";
-        let lexer = Lexer::new(input.chars());
-        let mut parser = Parser::new(lexer);
+        // 4 * (5 + 3);
+        // (4 * (5 + 3));
+        let input = vec![
+            Token::Int("4".to_string()),
+            Token::Op(Operator::Splat),
+            Token::OpenParen,
+            Token::Int("5".to_string()),
+            Token::Op(Operator::Plus),
+            Token::Int("3".to_string()),
+            Token::CloseParen,
+            Token::Semicolon,
+        ];
+        let mut parser = Parser::new(input.into_iter());
         let program = parser.parse_program()?;
-        let program = program.statements[0].to_string();
-        assert_eq!("((3 + (4 * 5)) == ((3 * 1) + (4 * 5)));", program);
+        assert_eq!(1, program.statements.len());
+        let statement = &program.statements[0];
+
+        // TODO: Consider a macro for this
+        // "3 + 4 * 5 == 3 * 1 + 4 * 5";
+
+        let input = vec![
+            Token::Int("3".to_string()),
+            Token::Op(Operator::Plus),
+            Token::Int("4".to_string()),
+            Token::Op(Operator::Splat),
+            Token::Int("5".to_string()),
+            Token::Op(Operator::Eq),
+            Token::Int("3".to_string()),
+            Token::Op(Operator::Splat),
+            Token::Int("1".to_string()),
+            Token::Op(Operator::Plus),
+            Token::Int("4".to_string()),
+            Token::Op(Operator::Splat),
+            Token::Int("5".to_string()),
+        ];
+        let mut parser = Parser::new(input.into_iter());
+        let program = parser.parse_program()?;
+        let statement = &program.statements[0];
+
+        assert_matches!(
+            statement,
+            Statement::ExpressionStatement {
+                expr: Expression::InfixExpression {
+                    // 3 + (4 * 5)
+                    left: box Expression::InfixExpression {
+                        left: box Expression::IntegerLiteral(3),
+                        op: Operator::Plus,
+                        right: box Expression::InfixExpression {
+                            left: box Expression::IntegerLiteral(4),
+                            op: Operator::Splat,
+                            right: box Expression::IntegerLiteral(5),
+                        },
+                    },
+                    op: Operator::Eq,
+                    // (3 * 1) + (4 * 5)
+                    right: box Expression::InfixExpression {
+                        left: box Expression::InfixExpression {
+                            left: box Expression::IntegerLiteral(3),
+                            op: Operator::Splat,
+                            right: box Expression::IntegerLiteral(1),
+                        },
+                        op: Operator::Plus,
+                        right: box Expression::InfixExpression {
+                            left: box Expression::IntegerLiteral(4),
+                            op: Operator::Splat,
+                            right: box Expression::IntegerLiteral(5),
+                        },
+                    }
+                }
+             }
+        );
 
         Ok(())
     }

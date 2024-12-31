@@ -1,6 +1,6 @@
 use std::fmt::Write;
 
-use crate::{lex::Operator, StopRawLiteral, StopInteger};
+use crate::{lex::Operator, StopBool, StopInteger, StopRawLiteral};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Program {
@@ -9,9 +9,7 @@ pub struct Program {
 
 impl Program {
     pub(crate) fn new(statements: Vec<Statement>) -> Self {
-        Self {
-            statements,
-        }
+        Self { statements }
     }
 }
 
@@ -39,22 +37,25 @@ pub enum Statement {
     },
     ExpressionStatement {
         expr: Expression,
-    }
+    },
 }
 
 impl std::fmt::Display for Statement {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Statement::LetStatement { ident: name, expr: value } => {
+            Statement::LetStatement {
+                ident: name,
+                expr: value,
+            } => {
                 f.write_str("let ")?;
                 f.write_str(name)?;
                 f.write_str(" = ")?;
                 f.write_str(value.to_string().as_str())?;
-            },
+            }
             Statement::ReturnStatement { expr: value } => {
                 f.write_str("return ")?;
                 f.write_str(value.to_string().as_str())?;
-            },
+            }
             Statement::ExpressionStatement { expr: expression } => {
                 f.write_str(expression.to_string().as_str())?;
             }
@@ -68,6 +69,7 @@ impl std::fmt::Display for Statement {
 pub enum Expression {
     IdentifierLiteral(StopRawLiteral),
     IntegerLiteral(StopInteger),
+    BooleanLiteral(StopBool),
     PrefixExpression {
         op: Operator,
         right: Box<Expression>,
@@ -80,7 +82,7 @@ pub enum Expression {
     CallExpression {
         ident: StopRawLiteral,
         args: Vec<Expression>,
-    }
+    },
 }
 
 impl std::fmt::Display for Expression {
@@ -88,12 +90,13 @@ impl std::fmt::Display for Expression {
         match self {
             Expression::IdentifierLiteral(ident) => f.write_str(ident)?,
             Expression::IntegerLiteral(int) => f.write_str(int.to_string().as_str())?,
+            Expression::BooleanLiteral(b) => f.write_str(b.to_string().as_str())?,
             Expression::PrefixExpression { op, right } => {
                 f.write_char('(')?;
                 f.write_str(<Operator as Into<&str>>::into(*op))?;
                 f.write_str(right.to_string().as_str())?;
                 f.write_char(')')?;
-            },
+            }
             Expression::InfixExpression { left, op, right } => {
                 f.write_char('(')?;
                 f.write_str(left.to_string().as_str())?;
@@ -102,7 +105,7 @@ impl std::fmt::Display for Expression {
                 f.write_char(' ')?;
                 f.write_str(right.to_string().as_str())?;
                 f.write_char(')')?;
-            },
+            }
             Expression::CallExpression { ident, args } => {
                 f.write_str(ident)?;
                 f.write_char('(')?;
@@ -131,17 +134,11 @@ mod tests {
             ident: StopRawLiteral::from("myVar"),
             expr: Expression::CallExpression {
                 ident: StopRawLiteral::from("add"),
-                args: vec![
-                    Expression::IntegerLiteral(1),
-                    Expression::IntegerLiteral(2),
-                ],
+                args: vec![Expression::IntegerLiteral(1), Expression::IntegerLiteral(2)],
             },
         };
 
-        assert_eq!(
-            "let myVar = add(1, 2);",
-            let_statement.to_string()
-        );
+        assert_eq!("let myVar = add(1, 2);", let_statement.to_string());
     }
 
     #[test]
@@ -151,20 +148,14 @@ mod tests {
             expr: Expression::InfixExpression {
                 left: Box::new(Expression::CallExpression {
                     ident: StopRawLiteral::from("add"),
-                    args: vec![
-                        Expression::IntegerLiteral(5),
-                        Expression::IntegerLiteral(5),
-                    ],
+                    args: vec![Expression::IntegerLiteral(5), Expression::IntegerLiteral(5)],
                 }),
                 op: Operator::Plus,
                 right: Box::new(Expression::IntegerLiteral(5)),
             },
         };
 
-        assert_eq!(
-            "return (add(5, 5) + 5);",
-            return_statement.to_string(),
-        );
+        assert_eq!("return (add(5, 5) + 5);", return_statement.to_string(),);
     }
 
     #[test]
@@ -173,17 +164,11 @@ mod tests {
         let expr_statement = Statement::ExpressionStatement {
             expr: Expression::CallExpression {
                 ident: StopRawLiteral::from("add"),
-                args: vec![
-                    Expression::IntegerLiteral(1),
-                    Expression::IntegerLiteral(2),
-                ],
+                args: vec![Expression::IntegerLiteral(1), Expression::IntegerLiteral(2)],
             },
         };
 
-        assert_eq!(
-            "add(1, 2);",
-            expr_statement.to_string(),
-        );
+        assert_eq!("add(1, 2);", expr_statement.to_string(),);
     }
 
     #[test]
@@ -206,7 +191,7 @@ mod tests {
                         Expression::IdentifierLiteral(StopRawLiteral::from("x")),
                         Expression::IntegerLiteral(10),
                     ],
-                }
+                },
             },
             Statement::ExpressionStatement {
                 expr: Expression::IdentifierLiteral(StopRawLiteral::from("x")),
@@ -217,12 +202,7 @@ mod tests {
         ]);
 
         assert_eq!(
-            concat!(
-                "let x = 5;\n",
-                "let y = add(x, 10);\n",
-                "x;\n",
-                "y;",
-            ),
+            concat!("let x = 5;\n", "let y = add(x, 10);\n", "x;\n", "y;",),
             program.to_string(),
         );
     }
@@ -241,11 +221,28 @@ mod tests {
                     right: Box::new(Expression::IntegerLiteral(2)),
                 }),
             },
-            expected);
+            expected,
+        );
     }
 
-    fn test_expression(input: Expression, expected: &str)
-    {
+    #[test]
+    fn it_displays_boolean_expression() {
+        // true && false
+        let expected = "(true && false)";
+        test_expression(
+            Expression::InfixExpression {
+                left: Box::new(Expression::BooleanLiteral(true)),
+                op: Operator::And,
+                right: Box::new(Expression::BooleanLiteral(false)),
+            },
+            expected,
+        );
+
+        let expected = "false";
+        test_expression(Expression::BooleanLiteral(false), expected);
+    }
+
+    fn test_expression(input: Expression, expected: &str) {
         assert_eq!(expected, input.to_string());
     }
 }

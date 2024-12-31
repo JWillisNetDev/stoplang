@@ -7,23 +7,27 @@ static KEYWORDS: phf::Map<&'static str, Token> = phf::phf_map! {
     "else" => Token::Else,
     "fn" => Token::Fn,
     "return" => Token::Return,
+    "true" => Token::True,
+    "false" => Token::False,
 };
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Operator {
-    Assign,
-    Eq,
-    Neq,
-    Plus,
-    Minus,
-    Bang,
-    Splat,
-    Slash,
-    Lt,
-    Lte,
-    Gt,
-    Gte,
+    Assign, // =
+    Eq,     // ==
+    Neq,    // !=
+    Plus,   // +
+    Minus,  // -
+    Bang,   // !
+    Splat,  // *
+    Slash,  // /
+    Lt,     // <
+    Lte,    // <=
+    Gt,     // >
+    Gte,    // >=
+    And,    // &&
 }
+
 #[allow(clippy::from_over_into)] // We don't want From<&str> because it would not have any use.
 impl Into<&str> for Operator {
     fn into(self) -> &'static str {
@@ -41,6 +45,7 @@ impl Into<&str> for Operator {
             Lte => "<=",
             Gt => ">",
             Gte => ">=",
+            And => "&&",
         }
     }
 }
@@ -57,6 +62,8 @@ pub enum Token {
     // Literals
     Ident(StopRawLiteral),
     Int(StopRawLiteral),
+    True,
+    False,
 
     // Operators
     Op(Operator),
@@ -175,6 +182,11 @@ impl<T: Iterator<Item = char>> Lexer<T> {
                 } else {
                     Token::Op(Operator::Gt)
                 }
+            }
+            Some('&') if self.peek().is_some_and(|&c| c == '&') => {
+                // TODO(Bitwise): Handle bitwise AND op (BitAnd?)
+                self.read();
+                Token::Op(Operator::And)
             }
             Some(';') => Token::Semicolon,
             Some(',') => Token::Comma,
@@ -415,12 +427,20 @@ pub mod tests {
 
     #[test]
     fn it_parses_keywords() {
-        let input = r#"let if else fn return"#;
+        let input = r#"let if else fn return true false"#;
         let mut lexer = Lexer::new(input.chars());
 
         use Token::*;
         test_tokens(
-            vec![(Let, 3), (If, 6), (Else, 11), (Fn, 14), (Return, 21)],
+            vec![
+                (Let, 3),
+                (If, 6),
+                (Else, 11),
+                (Fn, 14),
+                (Return, 21),
+                (True, 26),
+                (False, 32),
+            ],
             &mut lexer,
         );
 
@@ -429,11 +449,11 @@ pub mod tests {
 
     #[test]
     fn it_parses_operators() {
-        let input = r#"= == + - ! * / != > >= < <="#;
+        let input = r#"= == + - ! * / != > >= < <= &&"#;
         let mut lexer = Lexer::new(input.chars());
 
-        use Token::*;
         use Operator::*;
+        use Token::*;
         test_tokens(
             vec![
                 (Op(Assign), 1),
@@ -448,9 +468,11 @@ pub mod tests {
                 (Op(Gte), 22),
                 (Op(Lt), 24),
                 (Op(Lte), 27),
+                (Op(And), 30),
             ],
-            &mut lexer,);
-        
+            &mut lexer,
+        );
+
         assert_eq!(None, lexer.next());
     }
 

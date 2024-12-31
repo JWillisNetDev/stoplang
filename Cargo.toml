@@ -1,3 +1,5 @@
+# cargo-features = ["box_patterns"]
+
 [workspace]
 resolver = "2"
 members = [
