@@ -89,19 +89,19 @@ impl std::fmt::Display for Expression {
             Expression::IdentifierLiteral(ident) => f.write_str(ident)?,
             Expression::IntegerLiteral(int) => f.write_str(int.to_string().as_str())?,
             Expression::PrefixExpression { op, right } => {
-                f.write_str("(")?;
+                f.write_char('(')?;
                 f.write_str(<Operator as Into<&str>>::into(*op))?;
                 f.write_str(right.to_string().as_str())?;
-                f.write_str(")")?;
+                f.write_char(')')?;
             },
             Expression::InfixExpression { left, op, right } => {
-                f.write_str("(")?;
+                f.write_char('(')?;
                 f.write_str(left.to_string().as_str())?;
-                f.write_str(" ")?;
+                f.write_char(' ')?;
                 f.write_str(<Operator as Into<&str>>::into(*op))?;
-                f.write_str(" ")?;
+                f.write_char(' ')?;
                 f.write_str(right.to_string().as_str())?;
-                f.write_str(")")?;
+                f.write_char(')')?;
             },
             Expression::CallExpression { ident, args } => {
                 f.write_str(ident)?;

@@ -8,6 +8,32 @@ use std::iter::Peekable;
 pub type ParseError = String;
 pub type ParseResult<T> = Result<T, ParseError>;
 
+fn is_prefix(token: &Token) -> bool {
+    use Operator::*;
+    matches!(
+        token,
+        Token::Op(Bang) | Token::Op(Minus) | Token::Int(_) | Token::Ident(_)
+    )
+}
+
+fn is_infix(token: &Token) -> bool {
+    use Operator::*;
+    matches!(
+        token,
+        Token::Op(Plus)
+            | Token::Op(Minus)
+            | Token::Op(Splat)
+            | Token::Op(Slash)
+            | Token::Op(Gt)
+            | Token::Op(Gte)
+            | Token::Op(Lt)
+            | Token::Op(Lte)
+            | Token::Op(Eq)
+            | Token::Op(Neq)
+    )
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Precedence {
     Lowest = 1,
     Equals = 2,
@@ -16,6 +42,24 @@ pub enum Precedence {
     Product = 5,
     Prefix = 6,
     Call = 7,
+}
+
+impl Precedence {
+    fn of(token: &Token) -> Self {
+        if let Token::Op(op) = token {
+            match op {
+                Operator::Eq | Operator::Neq => Precedence::Equals,
+                Operator::Lt | Operator::Lte | Operator::Gt | Operator::Gte => {
+                    Precedence::LessGreater
+                }
+                Operator::Plus | Operator::Minus => Precedence::Sum,
+                Operator::Splat | Operator::Slash => Precedence::Product,
+                _ => Precedence::Lowest,
+            }
+        } else {
+            Precedence::Lowest
+        }
+    }
 }
 
 pub struct Parser<T: Iterator<Item = Token>> {
@@ -93,42 +137,85 @@ impl<T: Iterator<Item = Token>> Parser<T> {
         })
     }
 
-    fn parse_expression(
-        &mut self,
-        token: Token,
-        precedence: Precedence,
-    ) -> ParseResult<Expression> {
+    fn parse_prefix(&mut self, token: &Token) -> ParseResult<Expression> {
         match token {
-            Token::Ident(ident) => Ok(Expression::IdentifierLiteral(ident)),
-            Token::Int(value) => {
-                let value: crate::StopInteger = value
+            Token::Ident(ident) => Ok(Expression::IdentifierLiteral(ident.clone())),
+            Token::Int(int) => {
+                let int = int
                     .parse()
                     .map_err(|e| format!("failed to parse integer: {}", e))?;
-                Ok(Expression::IntegerLiteral(value))
+                Ok(Expression::IntegerLiteral(int))
             }
-            Token::Op(op) if [Operator::Minus, Operator::Bang].contains(&op) => {
-                let next_token = match self.read() {
-                    Some(t) => t,
-                    None => Err(format!(
-                        "expected expression after prefix operator {}",
-                        <Operator as Into<&str>>::into(op)
-                    ))?, // Improve error message
-                };
-                let right = Box::new(self.parse_expression(next_token, Precedence::Prefix)?);
-                Ok(Expression::PrefixExpression { op, right })
+            Token::Op(op) if is_prefix(token) => {
+                let next_token = self.read().ok_or_else(|| {
+                    format!(
+                        "expected an expression following prefix operator {}, found nothing",
+                        <Operator as Into<&str>>::into(*op)
+                    )
+                })?;
+                let right = Box::new(self.parse_expression(&next_token, Precedence::Prefix)?);
+                Ok(Expression::PrefixExpression { op: *op, right })
             }
-            _ => todo!("parse_expression: {:?}", token),
+            _ => Err(format!("unexpected token {:?}, expected a prefix", token)),
         }
     }
 
-    fn parse_expression_statement(&mut self, token: Token) -> ParseResult<Statement> {
+    fn parse_infix(&mut self, left: Expression) -> ParseResult<Expression> {
+        let token = self.read().ok_or("expected an infix operator, found nothing")?;
+        let op = match token {
+            Token::Op(op) if is_infix(&token) => op,
+            _ => {
+                return Err(format!(
+                    "unexpected token {:?}, expected an infix operator",
+                    token
+                ))
+            }
+        };
+
+        let next_token = self.read().ok_or_else(|| {
+            format!(
+                "expected an expression following infix operator {}, found nothing",
+                <Operator as Into<&str>>::into(op)
+            )
+        })?;
+
+        let right = Box::new(self.parse_expression(&next_token, Precedence::of(&token))?);
+        Ok(Expression::InfixExpression {
+            left: Box::new(left),
+            op,
+            right,
+        })
+    }
+
+    fn parse_expression(
+        &mut self,
+        token: &Token,
+        precedence: Precedence,
+    ) -> ParseResult<Expression> {
+        let mut expr = self.parse_prefix(token)?;
+
+        if let Some(mut next) = self.peek() {
+            while next != &Token::Semicolon && precedence < Precedence::of(next) && is_infix(next) {
+                expr = self.parse_infix(expr)?;
+                self.read();
+                next = match self.peek() {
+                    Some(token) => token,
+                    None => break,
+                };
+            }
+        }
+        
+        Ok(expr)
+    }
+
+    fn parse_expression_statement(&mut self, token: &Token) -> ParseResult<Statement> {
         // <expression>;
         let expr = self.parse_expression(token, Precedence::Lowest)?;
         if let Some(Token::Semicolon) = self.peek() {
             self.read();
         }
 
-        return Ok(Statement::ExpressionStatement { expr });
+        Ok(Statement::ExpressionStatement { expr })
     }
 }
 
@@ -140,7 +227,7 @@ impl<T: Iterator<Item = Token>> Iterator for Parser<T> {
         Some(match next {
             Token::Let => self.parse_let_statement(),
             Token::Return => self.parse_return_statement(),
-            _ => self.parse_expression_statement(next),
+            _ => self.parse_expression_statement(&next),
         })
     }
 }
@@ -260,7 +347,7 @@ mod tests {
             } => (op.clone(), right.clone())
         );
         assert_eq!(Operator::Minus, prefix.0);
-        assert_eq!(Expression::IntegerLiteral(5), *prefix.1);
+        helpers::assert_integer_expr(*prefix.1, 5);
 
         // !5;
         let input = vec![
@@ -280,8 +367,154 @@ mod tests {
             } => (op.clone(), right.clone())
         );
         assert_eq!(Operator::Bang, prefix.0);
-        assert_eq!(Expression::IntegerLiteral(5), *prefix.1);
+        helpers::assert_integer_expr(*prefix.1, 5);
 
         Ok(())
+    }
+
+    #[test]
+    fn it_parses_infix_expr() -> TestResult {
+        // 5 + 5;
+        // 5 - 5;
+        // 5 * 5;
+        // 5 / 5;
+        // 5 > 5;
+        // 5 >= 5;
+        // 5 < 5;
+        // 5 <= 5;
+        // 5 == 5;
+        // 5 != 5;
+
+        let input = vec![
+            Token::Int("5".to_string()),
+            Token::Op(Operator::Plus),
+            Token::Int("5".to_string()),
+            Token::Semicolon,
+            Token::Int("5".to_string()),
+            Token::Op(Operator::Minus),
+            Token::Int("5".to_string()),
+            Token::Semicolon,
+            Token::Int("5".to_string()),
+            Token::Op(Operator::Splat),
+            Token::Int("5".to_string()),
+            Token::Semicolon,
+            Token::Int("5".to_string()),
+            Token::Op(Operator::Slash),
+            Token::Int("5".to_string()),
+            Token::Semicolon,
+            Token::Int("5".to_string()),
+            Token::Op(Operator::Gt),
+            Token::Int("5".to_string()),
+            Token::Semicolon,
+            Token::Int("5".to_string()),
+            Token::Op(Operator::Gte),
+            Token::Int("5".to_string()),
+            Token::Semicolon,
+            Token::Int("5".to_string()),
+            Token::Op(Operator::Lt),
+            Token::Int("5".to_string()),
+            Token::Semicolon,
+            Token::Int("5".to_string()),
+            Token::Op(Operator::Lte),
+            Token::Int("5".to_string()),
+            Token::Semicolon,
+            Token::Int("5".to_string()),
+            Token::Op(Operator::Eq),
+            Token::Int("5".to_string()),
+            Token::Semicolon,
+            Token::Int("5".to_string()),
+            Token::Op(Operator::Neq),
+            Token::Int("5".to_string()),
+            Token::Semicolon,
+        ];
+        let mut parser = Parser::new(input.into_iter());
+        let program = parser.parse_program()?;
+
+        helpers::assert_infix_expr(
+            program,
+            vec![
+                (
+                    Expression::IntegerLiteral(5),
+                    Operator::Plus,
+                    Expression::IntegerLiteral(5),
+                ),
+                (
+                    Expression::IntegerLiteral(5),
+                    Operator::Minus,
+                    Expression::IntegerLiteral(5),
+                ),
+                (
+                    Expression::IntegerLiteral(5),
+                    Operator::Splat,
+                    Expression::IntegerLiteral(5),
+                ),
+                (
+                    Expression::IntegerLiteral(5),
+                    Operator::Slash,
+                    Expression::IntegerLiteral(5),
+                ),
+                (
+                    Expression::IntegerLiteral(5),
+                    Operator::Gt,
+                    Expression::IntegerLiteral(5),
+                ),
+                (
+                    Expression::IntegerLiteral(5),
+                    Operator::Gte,
+                    Expression::IntegerLiteral(5),
+                ),
+                (
+                    Expression::IntegerLiteral(5),
+                    Operator::Lt,
+                    Expression::IntegerLiteral(5),
+                ),
+                (
+                    Expression::IntegerLiteral(5),
+                    Operator::Lte,
+                    Expression::IntegerLiteral(5),
+                ),
+                (
+                    Expression::IntegerLiteral(5),
+                    Operator::Eq,
+                    Expression::IntegerLiteral(5),
+                ),
+                (
+                    Expression::IntegerLiteral(5),
+                    Operator::Neq,
+                    Expression::IntegerLiteral(5),
+                ),
+            ],
+        );
+
+        Ok(())
+    }
+
+    mod helpers {
+        use super::*;
+
+        pub fn assert_integer_expr(expr: Expression, expected: crate::StopInteger) {
+            assert_eq!(Expression::IntegerLiteral(expected), expr)
+        }
+
+        pub fn assert_infix_expr(
+            program: Program,
+            expected: Vec<(Expression, Operator, Expression)>,
+        ) {
+            let statements = program.statements;
+            assert_eq!(expected.len(), statements.len());
+            for (statement, (expected_left, expected_op, expected_right)) in
+                statements.iter().zip(expected.iter())
+            {
+                let (left, op, right) = assert_matches!(
+                    statement,
+                    Statement::ExpressionStatement {
+                        expr: Expression::InfixExpression { left, op, right },
+                    } => (left.clone(), *op, right.clone())
+                );
+                assert_eq!(*expected_left, *left);
+                assert_eq!(*expected_op, op);
+                assert_eq!(*expected_right, *right);
+            }
+        }
     }
 }

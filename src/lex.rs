@@ -19,10 +19,10 @@ pub enum Operator {
     Bang,
     Splat,
     Slash,
-    LessThan,
-    LessThanEq,
-    GreaterThan,
-    GreaterThanEq,
+    Lt,
+    Lte,
+    Gt,
+    Gte,
 }
 #[allow(clippy::from_over_into)] // We don't want From<&str> because it would not have any use.
 impl Into<&str> for Operator {
@@ -37,10 +37,10 @@ impl Into<&str> for Operator {
             Bang => "!",
             Splat => "*",
             Slash => "/",
-            LessThan => "<",
-            LessThanEq => "<=",
-            GreaterThan => ">",
-            GreaterThanEq => ">=",
+            Lt => "<",
+            Lte => "<=",
+            Gt => ">",
+            Gte => ">=",
         }
     }
 }
@@ -162,18 +162,18 @@ impl<T: Iterator<Item = char>> Lexer<T> {
                 let c = self.peek();
                 if let Some('=') = c {
                     self.read();
-                    Token::Op(Operator::LessThanEq)
+                    Token::Op(Operator::Lte)
                 } else {
-                    Token::Op(Operator::LessThan)
+                    Token::Op(Operator::Lt)
                 }
             }
             Some('>') => {
                 let c = self.peek();
                 if let Some('=') = c {
                     self.read();
-                    Token::Op(Operator::GreaterThanEq)
+                    Token::Op(Operator::Gte)
                 } else {
-                    Token::Op(Operator::GreaterThan)
+                    Token::Op(Operator::Gt)
                 }
             }
             Some(';') => Token::Semicolon,
@@ -444,10 +444,10 @@ pub mod tests {
                 (Op(Splat), 12),
                 (Op(Slash), 14),
                 (Op(Neq), 17),
-                (Op(GreaterThan), 19),
-                (Op(GreaterThanEq), 22),
-                (Op(LessThan), 24),
-                (Op(LessThanEq), 27),
+                (Op(Gt), 19),
+                (Op(Gte), 22),
+                (Op(Lt), 24),
+                (Op(Lte), 27),
             ],
             &mut lexer,);
         
