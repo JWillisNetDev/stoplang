@@ -169,58 +169,74 @@ impl<T: Iterator<Item = Token>> Parser<T> {
         Ok(Statement::ExpressionStatement { expr })
     }
 
+    fn parse_identifier_literal(&mut self, ident: StopRawLiteral) -> ParseResult<Expression> {
+        Ok(Expression::IdentifierLiteral(ident))
+    }
+
+    fn parse_int_literal(&mut self, int: &StopRawLiteral) -> ParseResult<Expression> {
+        let int = int
+            .parse()
+            .map_err(|e| format!("failed to parse integer: {}", e))?;
+        Ok(Expression::IntegerLiteral(int))
+    }
+
+    fn parse_prefix_operator(&mut self, op: Operator) -> ParseResult<Expression> {
+        let token = self.read().ok_or(format!(
+            "expected an expression following prefix operator {}",
+            <Operator as Into<&str>>::into(op)
+        ))?;
+        let right = Box::new(self.parse_expression(&token, Precedence::Prefix)?);
+        Ok(Expression::PrefixExpression { op, right })
+    }
+
+    fn parse_group_expression(&mut self) -> ParseResult<Expression> {
+        let token = self.read().ok_or("expected an expression following (")?;
+        let expr = self.parse_expression(&token, Precedence::Lowest)?;
+        self.expect_token(Token::CloseParen)?;
+        Ok(expr)
+    }
+
+    fn parse_if_expression(&mut self) -> ParseResult<Expression> {
+        let token = self.read().ok_or("expected an expression following if")?;
+        let condition = Box::new(self.parse_expression(&token, Precedence::Lowest)?);
+        let consequence = Box::new(
+            self.try_parse_statement()
+                .ok_or("expected statement following if condition")??,
+        );
+
+        let alternative = if self.peek() == Some(&Token::Else) {
+            self.read();
+            Some(Box::new(
+                self.try_parse_statement()
+                    .ok_or("expected statement following else")??,
+            ))
+        } else {
+            None
+        };
+
+        Ok(Expression::IfExpression {
+            condition,
+            consequence,
+            alternative,
+        })
+    }
+
     fn parse_prefix(&mut self, token: &Token) -> ParseResult<Expression> {
         match token {
-            Token::Ident(ident) => Ok(Expression::IdentifierLiteral(ident.clone())),
+            Token::Ident(ident) => {
+                self.parse_identifier_literal(ident.clone())
+            }
             Token::Int(int) => {
-                let int = int
-                    .parse()
-                    .map_err(|e| format!("failed to parse integer: {}", e))?;
-                Ok(Expression::IntegerLiteral(int))
+                self.parse_int_literal(int)
             }
             Token::Op(op) if is_prefix(token) => {
-                let next_token = self.read().ok_or_else(|| {
-                    format!(
-                        "expected an expression following prefix operator {}, found nothing",
-                        <Operator as Into<&str>>::into(*op)
-                    )
-                })?;
-                let right = Box::new(self.parse_expression(&next_token, Precedence::Prefix)?);
-                Ok(Expression::PrefixExpression { op: *op, right })
+                self.parse_prefix_operator(*op)
             }
             Token::OpenParen => {
-                let next_token = self.read().ok_or("expected an expression following (")?;
-                let expr = self.parse_expression(&next_token, Precedence::Lowest)?;
-                self.expect_token(Token::CloseParen)?;
-                Ok(expr)
+                self.parse_group_expression()
             }
             Token::If => {
-                let token = self.read().ok_or("expected an expression following if")?;
-                let condition = Box::new(self.parse_expression(&token, Precedence::Lowest)?);
-
-                let consequence = Box::new(
-                    self.try_parse_statement()
-                        .ok_or("expected statement following if condition")??,
-                );
-
-                if self.peek() == Some(&Token::Else) {
-                    self.read();
-                    let alternative = Box::new(
-                        self.try_parse_statement()
-                            .ok_or("expected statement following else")??,
-                    );
-                    Ok(Expression::IfExpression {
-                        condition,
-                        consequence: consequence,
-                        alternative: Some(alternative),
-                    })
-                } else {
-                    Ok(Expression::IfExpression {
-                        condition,
-                        consequence: consequence,
-                        alternative: None,
-                    })
-                }
+                self.parse_if_expression()
             }
             _ => Err(format!("unexpected token {:?}, expected a prefix", token)),
         }
@@ -870,6 +886,47 @@ mod tests {
                 })],
             })),
             alternative
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn it_parses_fn_literal_expr() -> TestResult {
+        // fn(x, y) { x + y };
+        let input = vec![
+            Token::Fn,
+            Token::OpenParen,
+            Token::Ident("x".to_string()),
+            Token::Comma,
+            Token::Ident("y".to_string()),
+            Token::CloseParen,
+            Token::OpenBrace,
+            Token::Ident("x".to_string()),
+            Token::Op(Operator::Plus),
+            Token::Ident("y".to_string()),
+            Token::CloseBrace,
+            Token::Semicolon,
+        ];
+        let mut parser = Parser::new(input.into_iter());
+        let program = parser.parse_program()?;
+        assert_eq!(1, program.statements.len());
+        let statement = &program.statements[0];
+
+        assert_eq!(
+            Statement::ExpressionStatement {
+                expr: Expression::FnLiteral {
+                    params: vec!["x".to_string(), "y".to_string()],
+                    body: Box::new(Statement::ExpressionStatement {
+                        expr: Expression::InfixExpression {
+                            left: Box::new(Expression::IdentifierLiteral("x".to_string())),
+                            op: Operator::Plus,
+                            right: Box::new(Expression::IdentifierLiteral("y".to_string())),
+                        },
+                    })
+                }
+            },
+            *statement
         );
 
         Ok(())
