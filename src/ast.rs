@@ -36,7 +36,6 @@ pub enum Expression {
     IntegerLiteral(StopInteger),
     BooleanLiteral(StopBool),
     FnLiteral {
-        ident: StopRawLiteral,
         params: Vec<StopRawLiteral>,
         body: Box<Statement>,
     },
@@ -127,11 +126,14 @@ impl std::fmt::Display for Expression {
             Expression::IdentifierLiteral(ident) => f.write_str(ident)?,
             Expression::IntegerLiteral(int) => f.write_str(int.to_string().as_str())?,
             Expression::BooleanLiteral(b) => f.write_str(b.to_string().as_str())?,
-            Expression::FnLiteral { ident, params, body } => {
-                f.write_str(ident)?;
-                f.write_char('(')?;
-                f.write_str(join_str(", ", params).as_str())?;
-                f.write_str(") ")?;
+            Expression::FnLiteral { params, body } => {
+                if params.is_empty() {
+                    f.write_str("fn() ")?;
+                } else {
+                    f.write_str("fn(")?;
+                    f.write_str(join_str(", ", params).as_str())?;
+                    f.write_str(") ")?;
+                }
                 f.write_str(body.to_string().as_str())?;
             }
             Expression::PrefixExpression { op, right } => {
@@ -360,7 +362,6 @@ mod tests {
         let expected = "fn() a;";
         test_expression(
             Expression::FnLiteral {
-                ident: StopRawLiteral::from("fn"),
                 params: vec![],
                 body: Box::new(Statement::ExpressionStatement {
                     expr: Expression::IdentifierLiteral(StopRawLiteral::from("a")),
@@ -373,7 +374,6 @@ mod tests {
         let expected = "fn(x, y) (x + y);";
         test_expression(
             Expression::FnLiteral {
-                ident: StopRawLiteral::from("fn"),
                 params: vec![StopRawLiteral::from("x"), StopRawLiteral::from("y")],
                 body: Box::new(Statement::ExpressionStatement {
                     expr: Expression::InfixExpression {
@@ -386,11 +386,10 @@ mod tests {
             expected
         );
 
-        // mul(x, y) return x * y;
-        let expected = "mul(x, y) return (x * y);";
+        // fn(x, y) return x * y;
+        let expected = "fn(x, y) return (x * y);";
         test_expression(
             Expression::FnLiteral {
-                ident: StopRawLiteral::from("mul"),
                 params: vec![StopRawLiteral::from("x"), StopRawLiteral::from("y")],
                 body: Box::new(Statement::ReturnStatement {
                     expr: Expression::InfixExpression {
@@ -403,16 +402,15 @@ mod tests {
             expected
         );
 
-        // sum(x, y) { let a = x + y; return a; }
+        // let sum = fn(x, y) { let a = x + y; return a; }
         let expected = concat!(
-            "sum(x, y) {\n",
+            "fn(x, y) {\n",
             "let a = (x + y);\n",
             "return a;\n",
             "}",
         );
         test_expression(
             Expression::FnLiteral {
-                ident: StopRawLiteral::from("sum"),
                 params: vec![StopRawLiteral::from("x"), StopRawLiteral::from("y")],
                 body: Box::new(Statement::BlockStatement {
                     statements: vec![
