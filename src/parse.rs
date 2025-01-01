@@ -104,37 +104,69 @@ impl<T: Iterator<Item = Token>> Parser<T> {
         }
     }
 
+    fn try_parse_statement(&mut self) -> Option<ParseResult<Statement>> {
+        let token = self.read();
+        match token {
+            Some(token) => match token {
+                Token::Let => Some(self.parse_let_statement()),
+                Token::Return => Some(self.parse_return_statement()),
+                Token::OpenBrace => Some(self.parse_block_statement()),
+                _ => Some(self.parse_expression_statement(&token)),
+            },
+            None => None,
+        }
+    }
+
     fn parse_let_statement(&mut self) -> ParseResult<Statement> {
         // let <identifier> = <expression>;
-        let name = self.expect_identifier()?;
+        let ident = self.expect_identifier()?;
         self.expect_token(Token::Op(Operator::Assign))?;
 
-        // TODO Expressions
-        while self.peek() != Some(&Token::Semicolon) {
-            self.read();
-        }
+        let token = self.read().ok_or("expected an expression following let")?;
+        let expr = self.parse_expression(&token, Precedence::Lowest)?;
 
         self.expect_token(Token::Semicolon)?;
 
-        Ok(Statement::LetStatement {
-            ident: name,
-            expr: Expression::IntegerLiteral(3),
-        })
+        Ok(Statement::LetStatement { ident, expr })
     }
 
     fn parse_return_statement(&mut self) -> ParseResult<Statement> {
         // return <expression>;
-
-        // TODO Expressions
-        while self.peek() != Some(&Token::Semicolon) {
-            self.read();
-        }
+        let token = self.read().ok_or("expected an expression following return")?;
+        let expr = self.parse_expression(&token, Precedence::Lowest)?;
 
         self.expect_token(Token::Semicolon)?;
 
         Ok(Statement::ReturnStatement {
-            expr: Expression::IntegerLiteral(3),
+            expr
         })
+    }
+
+    fn parse_block_statement(&mut self) -> ParseResult<Statement> {
+        // { <statement>* }
+        let mut statements = Vec::new();
+        while self.peek() != Some(&Token::CloseBrace) {
+            let statement = self.try_parse_statement();
+            match statement {
+                Some(Ok(statement)) => statements.push(Box::new(statement)),
+                Some(Err(e)) => return Err(e),
+                None => return Err("unexpected end of input".to_string()),
+            }
+        }
+
+        self.expect_token(Token::CloseBrace)?;
+
+        Ok(Statement::BlockStatement { statements })
+    }
+
+    fn parse_expression_statement(&mut self, token: &Token) -> ParseResult<Statement> {
+        // <expression>;
+        let expr = self.parse_expression(token, Precedence::Lowest)?;
+        if let Some(Token::Semicolon) = self.peek() {
+            self.read();
+        }
+
+        Ok(Statement::ExpressionStatement { expr })
     }
 
     fn parse_prefix(&mut self, token: &Token) -> ParseResult<Expression> {
@@ -155,6 +187,40 @@ impl<T: Iterator<Item = Token>> Parser<T> {
                 })?;
                 let right = Box::new(self.parse_expression(&next_token, Precedence::Prefix)?);
                 Ok(Expression::PrefixExpression { op: *op, right })
+            }
+            Token::OpenParen => {
+                let next_token = self.read().ok_or("expected an expression following (")?;
+                let expr = self.parse_expression(&next_token, Precedence::Lowest)?;
+                self.expect_token(Token::CloseParen)?;
+                Ok(expr)
+            }
+            Token::If => {
+                let token = self.read().ok_or("expected an expression following if")?;
+                let condition = Box::new(self.parse_expression(&token, Precedence::Lowest)?);
+
+                let consequence = Box::new(
+                    self.try_parse_statement()
+                        .ok_or("expected statement following if condition")??,
+                );
+
+                if self.peek() == Some(&Token::Else) {
+                    self.read();
+                    let alternative = Box::new(
+                        self.try_parse_statement()
+                            .ok_or("expected statement following else")??,
+                    );
+                    Ok(Expression::IfExpression {
+                        condition,
+                        consequence: consequence,
+                        alternative: Some(alternative),
+                    })
+                } else {
+                    Ok(Expression::IfExpression {
+                        condition,
+                        consequence: consequence,
+                        alternative: None,
+                    })
+                }
             }
             _ => Err(format!("unexpected token {:?}, expected a prefix", token)),
         }
@@ -207,28 +273,13 @@ impl<T: Iterator<Item = Token>> Parser<T> {
 
         Ok(expr)
     }
-
-    fn parse_expression_statement(&mut self, token: &Token) -> ParseResult<Statement> {
-        // <expression>;
-        let expr = self.parse_expression(token, Precedence::Lowest)?;
-        if let Some(Token::Semicolon) = self.peek() {
-            self.read();
-        }
-
-        Ok(Statement::ExpressionStatement { expr })
-    }
 }
 
 impl<T: Iterator<Item = Token>> Iterator for Parser<T> {
     type Item = Result<Statement, ParseError>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let next = self.read()?;
-        Some(match next {
-            Token::Let => self.parse_let_statement(),
-            Token::Return => self.parse_return_statement(),
-            _ => self.parse_expression_statement(&next),
-        })
+        self.try_parse_statement()
     }
 }
 
@@ -283,6 +334,53 @@ mod tests {
             Statement::ReturnStatement {
                 .. //value: Expression::IntegerLiteral(5),
             }
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn it_parses_block_statement() -> TestResult {
+        // { let x = 5; let y = 10; }
+        let input = vec![
+            Token::OpenBrace,
+            Token::Let,
+            Token::Ident("x".to_string()),
+            Token::Op(Operator::Assign),
+            Token::Int("5".to_string()),
+            Token::Semicolon,
+            Token::Let,
+            Token::Ident("y".to_string()),
+            Token::Op(Operator::Assign),
+            Token::Int("10".to_string()),
+            Token::Semicolon,
+            Token::CloseBrace,
+        ];
+        let mut parser = Parser::new(input.into_iter());
+        let program = parser.parse_program()?;
+        let statements = program.statements;
+        assert_eq!(1, statements.len());
+
+        let block_statement = assert_matches!(
+            &statements[0],
+            Statement::BlockStatement { statements } => statements
+        );
+        assert_eq!(2, block_statement.len());
+
+        assert_eq!(
+            block_statement[0],
+            Box::new(Statement::LetStatement {
+                ident: "x".to_string(),
+                expr: Expression::IntegerLiteral(5),
+            })
+        );
+
+        assert_eq!(
+            block_statement[1],
+            Box::new(Statement::LetStatement {
+                ident: "y".to_string(),
+                expr: Expression::IntegerLiteral(10),
+            })
         );
 
         Ok(())
@@ -523,7 +621,6 @@ mod tests {
         );
 
         // 4 * (5 + 3);
-        // (4 * (5 + 3));
         let input = vec![
             Token::Int("4".to_string()),
             Token::Op(Operator::Splat),
@@ -538,6 +635,21 @@ mod tests {
         let program = parser.parse_program()?;
         assert_eq!(1, program.statements.len());
         let statement = &program.statements[0];
+
+        assert_matches!(
+            statement,
+            Statement::ExpressionStatement {
+                expr: Expression::InfixExpression {
+                    left: box Expression::IntegerLiteral(4),
+                    op: Operator::Splat,
+                    right: box Expression::InfixExpression {
+                        left: box Expression::IntegerLiteral(5),
+                        op: Operator::Plus,
+                        right: box Expression::IntegerLiteral(3),
+                    },
+                }
+            }
+        );
 
         // TODO: Consider a macro for this
         // "3 + 4 * 5 == 3 * 1 + 4 * 5";
@@ -592,6 +704,172 @@ mod tests {
                     }
                 }
              }
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn it_parses_grouped_expr() -> TestResult {
+        // (5 + 5) * 5;
+        let input = vec![
+            Token::OpenParen,
+            Token::Int("5".to_string()),
+            Token::Op(Operator::Plus),
+            Token::Int("5".to_string()),
+            Token::CloseParen,
+            Token::Op(Operator::Splat),
+            Token::Int("5".to_string()),
+            Token::Semicolon,
+        ];
+        let mut parser = Parser::new(input.into_iter());
+        let program = parser.parse_program()?;
+        assert_eq!(1, program.statements.len());
+        let statement = &program.statements[0];
+        assert_matches!(
+            statement,
+            Statement::ExpressionStatement {
+                expr: Expression::InfixExpression {
+                    left: box Expression::InfixExpression {
+                        // (5 + 5)
+                        left: box Expression::IntegerLiteral(5),
+                        op: Operator::Plus,
+                        right: box Expression::IntegerLiteral(5),
+                    },
+                    // * 5
+                    op: Operator::Splat,
+                    right: box Expression::IntegerLiteral(5),
+                }
+            }
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn it_parses_if_expr() -> TestResult {
+        // if x == 5 return x; else let x = 5;
+        let input = vec![
+            Token::If,
+            Token::OpenParen,
+            Token::Ident("x".to_string()),
+            Token::Op(Operator::Eq),
+            Token::Int("5".to_string()),
+            Token::CloseParen,
+            Token::Return,
+            Token::Ident("x".to_string()),
+            Token::Semicolon,
+            Token::Else,
+            Token::Let,
+            Token::Ident("x".to_string()),
+            Token::Op(Operator::Assign),
+            Token::Int("5".to_string()),
+            Token::Semicolon,
+        ];
+        let mut parser = Parser::new(input.into_iter());
+        let program = parser.parse_program()?;
+        assert_eq!(1, program.statements.len());
+        let statement = &program.statements[0];
+
+        let (condition, consequence, alternative) = assert_matches!(
+            statement,
+            Statement::ExpressionStatement {
+                expr: Expression::IfExpression {
+                    condition,
+                    consequence,
+                    alternative,
+                }
+            } => (*condition.clone(), *consequence.clone(), alternative.clone())
+        );
+
+        assert_eq!(
+            Expression::InfixExpression {
+                left: Box::new(Expression::IdentifierLiteral("x".to_string())),
+                op: Operator::Eq,
+                right: Box::new(Expression::IntegerLiteral(5)),
+            },
+            condition
+        );
+
+        assert_eq!(
+            Statement::ReturnStatement {
+                expr: Expression::IdentifierLiteral("x".to_string()),
+            },
+            consequence
+        );
+
+        assert_eq!(
+            Some(Box::new(Statement::LetStatement {
+                ident: "x".to_string(),
+                expr: Expression::IntegerLiteral(5),
+            })),
+            alternative
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn it_parses_if_expr_with_block_statements() -> TestResult {
+        // if (x < y) { x } else { y }
+        let input = vec![
+            Token::If,
+            Token::OpenParen,
+            Token::Ident("x".to_string()),
+            Token::Op(Operator::Lt),
+            Token::Ident("y".to_string()),
+            Token::CloseParen,
+            Token::OpenBrace,
+            Token::Ident("x".to_string()),
+            Token::CloseBrace,
+            Token::Else,
+            Token::OpenBrace,
+            Token::Ident("y".to_string()),
+            Token::CloseBrace,
+        ];
+        let mut parser = Parser::new(input.into_iter());
+        let program = parser.parse_program()?;
+        assert_eq!(1, program.statements.len());
+        let statement = &program.statements[0];
+
+        let (condition, consequence, alternative) = assert_matches!(
+            statement,
+            Statement::ExpressionStatement {
+                expr: Expression::IfExpression {
+                    condition,
+                    consequence,
+                    alternative,
+                }
+            } => (*condition.clone(), *consequence.clone(), alternative.clone())
+        );
+
+        let (ident_lhs, ident_rhs) = assert_matches!(
+            condition,
+            Expression::InfixExpression {
+                left: box Expression::IdentifierLiteral(ident_lhs),
+                op: Operator::Lt,
+                right: box Expression::IdentifierLiteral(ident_rhs),
+            } => (ident_lhs, ident_rhs)
+        );
+        assert_eq!("x".to_string(), ident_lhs);
+        assert_eq!("y".to_string(), ident_rhs);
+
+        assert_eq!(
+            Statement::BlockStatement {
+                statements: vec![Box::new(Statement::ExpressionStatement {
+                    expr: Expression::IdentifierLiteral("x".to_string()),
+                })],
+            },
+            consequence
+        );
+
+        assert_eq!(
+            Some(Box::new(Statement::BlockStatement {
+                statements: vec![Box::new(Statement::ExpressionStatement {
+                    expr: Expression::IdentifierLiteral("y".to_string()),
+                })],
+            })),
+            alternative
         );
 
         Ok(())

@@ -38,6 +38,9 @@ pub enum Statement {
     ExpressionStatement {
         expr: Expression,
     },
+    BlockStatement {
+        statements: Vec<Box<Statement>>,
+    }
 }
 
 impl std::fmt::Display for Statement {
@@ -51,16 +54,29 @@ impl std::fmt::Display for Statement {
                 f.write_str(name)?;
                 f.write_str(" = ")?;
                 f.write_str(value.to_string().as_str())?;
+                f.write_char(';')?;
             }
-            Statement::ReturnStatement { expr: value } => {
+            Statement::ReturnStatement { expr } => {
                 f.write_str("return ")?;
-                f.write_str(value.to_string().as_str())?;
+                f.write_str(expr.to_string().as_str())?;
+                f.write_char(';')?;
             }
-            Statement::ExpressionStatement { expr: expression } => {
-                f.write_str(expression.to_string().as_str())?;
+            Statement::ExpressionStatement { expr } => {
+                f.write_str(expr.to_string().as_str())?;
+                f.write_char(';')?;
+            }
+            Statement::BlockStatement { statements} => {
+                f.write_str("{\n")?;
+                if !statements.is_empty() {
+                    f.write_str(statements[0].to_string().as_str())?;
+                    for statement in statements.iter().skip(1) {
+                        f.write_char('\n')?;
+                        f.write_str(statement.to_string().as_str())?;
+                    }
+                }
+                f.write_str("\n}")?;
             }
         }
-        f.write_char(';')?;
         Ok(())
     }
 }
@@ -83,6 +99,11 @@ pub enum Expression {
         ident: StopRawLiteral,
         args: Vec<Expression>,
     },
+    IfExpression {
+        condition: Box<Expression>,
+        consequence: Box<Statement>,
+        alternative: Option<Box<Statement>>,
+    }
 }
 
 impl std::fmt::Display for Expression {
@@ -117,6 +138,16 @@ impl std::fmt::Display for Expression {
                     }
                 }
                 f.write_char(')')?;
+            }
+            Expression::IfExpression { condition, consequence, alternative } => {
+                f.write_str("if ")?;
+                f.write_str(condition.to_string().as_str())?;
+                f.write_str(" ")?;
+                f.write_str(consequence.to_string().as_str())?;
+                if let Some(alternative) = alternative {
+                    f.write_str(" else ")?;
+                    f.write_str(alternative.to_string().as_str())?;
+                }
             }
         }
         Ok(())
@@ -169,6 +200,45 @@ mod tests {
         };
 
         assert_eq!("add(1, 2);", expr_statement.to_string(),);
+    }
+
+    #[test]
+    fn it_displays_block_statement_ast() {
+        // {
+        //   let x = 5;
+        //   let y = 10;
+        //   x + y;
+        // }
+        let block_statement = Statement::BlockStatement {
+            statements: vec![
+                Box::new(Statement::LetStatement {
+                    ident: StopRawLiteral::from("x"),
+                    expr: Expression::IntegerLiteral(5),
+                }),
+                Box::new(Statement::LetStatement {
+                    ident: StopRawLiteral::from("y"),
+                    expr: Expression::IntegerLiteral(10),
+                }),
+                Box::new(Statement::ExpressionStatement {
+                    expr: Expression::InfixExpression {
+                        left: Box::new(Expression::IdentifierLiteral(StopRawLiteral::from("x"))),
+                        op: Operator::Plus,
+                        right: Box::new(Expression::IdentifierLiteral(StopRawLiteral::from("y"))),
+                    },
+                }),
+            ],
+        };
+
+        assert_eq!(
+            concat!(
+                "{\n",
+                "let x = 5;\n",
+                "let y = 10;\n",
+                "(x + y);\n",
+                "}",
+            ),
+            block_statement.to_string(),
+        );
     }
 
     #[test]
@@ -240,6 +310,28 @@ mod tests {
 
         let expected = "false";
         test_expression(Expression::BooleanLiteral(false), expected);
+    }
+
+    #[test]
+    fn it_displays_if_expression() {
+        // if (x < y) { x } else { y }
+        let expected = "if (x < y) x; else y;";
+        test_expression(
+            Expression::IfExpression {
+                condition: Box::new(Expression::InfixExpression {
+                    left: Box::new(Expression::IdentifierLiteral(StopRawLiteral::from("x"))),
+                    op: Operator::Lt,
+                    right: Box::new(Expression::IdentifierLiteral(StopRawLiteral::from("y"))),
+                }),
+                consequence: Box::new(Statement::ExpressionStatement {
+                    expr: Expression::IdentifierLiteral(StopRawLiteral::from("x")),
+                }),
+                alternative: Some(Box::new(Statement::ExpressionStatement {
+                    expr: Expression::IdentifierLiteral(StopRawLiteral::from("y")),
+                })),
+            },
+            expected,
+        );
     }
 
     fn test_expression(input: Expression, expected: &str) {
