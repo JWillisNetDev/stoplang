@@ -221,6 +221,34 @@ impl<T: Iterator<Item = Token>> Parser<T> {
         })
     }
 
+    fn parse_fn_literal(&mut self) -> ParseResult<Expression> {
+        // fn(<ident> ,*) <statement>
+        self.expect_token(Token::OpenParen)?;
+        
+        let mut params = Vec::new();
+        loop {
+            let ident = self.expect_identifier()?;
+            params.push(ident);
+            if self.peek().is_some_and(|t| t == &Token::Comma) {
+                self.read();
+            } else {
+                break;
+            }
+        }
+
+        while self.peek().is_some_and(|t| t != &Token::CloseParen) {
+            let ident = self.expect_identifier()?;
+            params.push(ident);
+        }
+
+        self.expect_token(Token::CloseParen)?;
+        let statement = Box::new(
+            self.try_parse_statement().ok_or("expected statement following fn")??,
+        );
+
+        Ok(Expression::FnLiteral { params, body: statement })
+    }
+
     fn parse_prefix(&mut self, token: &Token) -> ParseResult<Expression> {
         match token {
             Token::Ident(ident) => {
@@ -237,6 +265,9 @@ impl<T: Iterator<Item = Token>> Parser<T> {
             }
             Token::If => {
                 self.parse_if_expression()
+            }
+            Token::Fn => {
+                self.parse_fn_literal()
             }
             _ => Err(format!("unexpected token {:?}, expected a prefix", token)),
         }
@@ -893,6 +924,45 @@ mod tests {
 
     #[test]
     fn it_parses_fn_literal_expr() -> TestResult {
+        // fn(x, y) x + y;
+        let input = vec![
+            Token::Fn,
+            Token::OpenParen,
+            Token::Ident("x".to_string()),
+            Token::Comma,
+            Token::Ident("y".to_string()),
+            Token::CloseParen,
+            Token::Ident("x".to_string()),
+            Token::Op(Operator::Plus),
+            Token::Ident("y".to_string()),
+            Token::Semicolon,
+        ];
+        let mut parser = Parser::new(input.into_iter());
+        let program = parser.parse_program()?;
+        assert_eq!(1, program.statements.len());
+        let statement = &program.statements[0];
+
+        assert_eq!(
+            Statement::ExpressionStatement {
+                expr: Expression::FnLiteral {
+                    params: vec!["x".to_string(), "y".to_string()],
+                    body: Box::new(Statement::ExpressionStatement {
+                        expr: Expression::InfixExpression {
+                            left: Box::new(Expression::IdentifierLiteral("x".to_string())),
+                            op: Operator::Plus,
+                            right: Box::new(Expression::IdentifierLiteral("y".to_string())),
+                        }
+                    })
+                },
+            },
+            *statement
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn it_parses_fn_literal_expr_with_block_statement() -> TestResult {
         // fn(x, y) { x + y };
         let input = vec![
             Token::Fn,
@@ -917,14 +987,16 @@ mod tests {
             Statement::ExpressionStatement {
                 expr: Expression::FnLiteral {
                     params: vec!["x".to_string(), "y".to_string()],
-                    body: Box::new(Statement::ExpressionStatement {
-                        expr: Expression::InfixExpression {
-                            left: Box::new(Expression::IdentifierLiteral("x".to_string())),
-                            op: Operator::Plus,
-                            right: Box::new(Expression::IdentifierLiteral("y".to_string())),
-                        },
+                    body: Box::new(Statement::BlockStatement {
+                        statements: vec![Box::new(Statement::ExpressionStatement {
+                            expr: Expression::InfixExpression {
+                                left: Box::new(Expression::IdentifierLiteral("x".to_string())),
+                                op: Operator::Plus,
+                                right: Box::new(Expression::IdentifierLiteral("y".to_string())),
+                            }
+                        })]
                     })
-                }
+                },
             },
             *statement
         );
