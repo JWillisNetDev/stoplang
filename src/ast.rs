@@ -13,19 +13,6 @@ impl Program {
     }
 }
 
-impl std::fmt::Display for Program {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if !self.statements.is_empty() {
-            f.write_str(self.statements[0].to_string().as_str())?;
-            for statement in self.statements.iter().skip(1) {
-                f.write_char('\n')?;
-                f.write_str(statement.to_string().as_str())?;
-            }
-        }
-        Ok(())
-    }
-}
-
 #[derive(Clone, Debug, PartialEq)]
 pub enum Statement {
     LetStatement {
@@ -40,6 +27,58 @@ pub enum Statement {
     },
     BlockStatement {
         statements: Vec<Box<Statement>>,
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Expression {
+    IdentifierLiteral(StopRawLiteral),
+    IntegerLiteral(StopInteger),
+    BooleanLiteral(StopBool),
+    FnLiteral {
+        ident: StopRawLiteral,
+        params: Vec<StopRawLiteral>,
+        body: Box<Statement>,
+    },
+    PrefixExpression {
+        op: Operator,
+        right: Box<Expression>,
+    },
+    InfixExpression {
+        left: Box<Expression>,
+        op: Operator,
+        right: Box<Expression>,
+    },
+    CallExpression {
+        ident: StopRawLiteral,
+        args: Vec<Expression>,
+    },
+    IfExpression {
+        condition: Box<Expression>,
+        consequence: Box<Statement>,
+        alternative: Option<Box<Statement>>,
+    }
+}
+
+fn join_str(sep: &str, str: impl std::iter::IntoIterator<Item = impl AsRef<str>>) -> String {
+    let mut result = String::new();
+    let mut iter = str.into_iter();
+    if let Some(first) = iter.next() {
+        result.push_str(first.as_ref());
+        while let Some(next) = iter.next() {
+            result.push_str(sep);
+            result.push_str(next.as_ref());
+        }
+    }
+
+    result
+}
+
+impl std::fmt::Display for Program {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let statements = self.statements.iter().map(|s| s.to_string());
+        f.write_str(join_str("\n", statements).as_str())?;
+        Ok(())
     }
 }
 
@@ -66,43 +105,19 @@ impl std::fmt::Display for Statement {
                 f.write_char(';')?;
             }
             Statement::BlockStatement { statements} => {
-                f.write_str("{\n")?;
-                if !statements.is_empty() {
-                    f.write_str(statements[0].to_string().as_str())?;
-                    for statement in statements.iter().skip(1) {
-                        f.write_char('\n')?;
-                        f.write_str(statement.to_string().as_str())?;
-                    }
+                if statements.is_empty() {
+                    // TODO Test this
+                    f.write_str("{ }")?;
+                    return Ok(());
                 }
+
+                let iter = statements.iter().map(|s| s.to_string());
+                f.write_str("{\n")?;
+                f.write_str(join_str("\n", iter).as_str())?;
                 f.write_str("\n}")?;
             }
         }
         Ok(())
-    }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum Expression {
-    IdentifierLiteral(StopRawLiteral),
-    IntegerLiteral(StopInteger),
-    BooleanLiteral(StopBool),
-    PrefixExpression {
-        op: Operator,
-        right: Box<Expression>,
-    },
-    InfixExpression {
-        left: Box<Expression>,
-        op: Operator,
-        right: Box<Expression>,
-    },
-    CallExpression {
-        ident: StopRawLiteral,
-        args: Vec<Expression>,
-    },
-    IfExpression {
-        condition: Box<Expression>,
-        consequence: Box<Statement>,
-        alternative: Option<Box<Statement>>,
     }
 }
 
@@ -112,6 +127,13 @@ impl std::fmt::Display for Expression {
             Expression::IdentifierLiteral(ident) => f.write_str(ident)?,
             Expression::IntegerLiteral(int) => f.write_str(int.to_string().as_str())?,
             Expression::BooleanLiteral(b) => f.write_str(b.to_string().as_str())?,
+            Expression::FnLiteral { ident, params, body } => {
+                f.write_str(ident)?;
+                f.write_char('(')?;
+                f.write_str(join_str(", ", params).as_str())?;
+                f.write_str(") ")?;
+                f.write_str(body.to_string().as_str())?;
+            }
             Expression::PrefixExpression { op, right } => {
                 f.write_char('(')?;
                 f.write_str(<Operator as Into<&str>>::into(*op))?;
@@ -129,14 +151,12 @@ impl std::fmt::Display for Expression {
             }
             Expression::CallExpression { ident, args } => {
                 f.write_str(ident)?;
-                f.write_char('(')?;
-                if !args.is_empty() {
-                    f.write_str(args[0].to_string().as_str())?;
-                    for arg in args.iter().skip(1) {
-                        f.write_str(", ")?;
-                        f.write_str(arg.to_string().as_str())?;
-                    }
+                if args.is_empty() {
+                    f.write_str("()")?;
+                    return Ok(())
                 }
+                f.write_char('(')?;
+                f.write_str(join_str(", ", args.iter().map(|e| e.to_string())).as_str())?;
                 f.write_char(')')?;
             }
             Expression::IfExpression { condition, consequence, alternative } => {
@@ -332,6 +352,85 @@ mod tests {
             },
             expected,
         );
+    }
+
+    #[test]
+    fn it_displays_fn_literal_expression() {
+        // fn() a;
+        let expected = "fn() a;";
+        test_expression(
+            Expression::FnLiteral {
+                ident: StopRawLiteral::from("fn"),
+                params: vec![],
+                body: Box::new(Statement::ExpressionStatement {
+                    expr: Expression::IdentifierLiteral(StopRawLiteral::from("a")),
+                }),
+            },
+            expected
+        );
+
+        // fn(x, y) { x + y }
+        let expected = "fn(x, y) (x + y);";
+        test_expression(
+            Expression::FnLiteral {
+                ident: StopRawLiteral::from("fn"),
+                params: vec![StopRawLiteral::from("x"), StopRawLiteral::from("y")],
+                body: Box::new(Statement::ExpressionStatement {
+                    expr: Expression::InfixExpression {
+                        left: Box::new(Expression::IdentifierLiteral(StopRawLiteral::from("x"))),
+                        op: Operator::Plus,
+                        right: Box::new(Expression::IdentifierLiteral(StopRawLiteral::from("y"))),
+                    }
+                })
+            },
+            expected
+        );
+
+        // mul(x, y) return x * y;
+        let expected = "mul(x, y) return (x * y);";
+        test_expression(
+            Expression::FnLiteral {
+                ident: StopRawLiteral::from("mul"),
+                params: vec![StopRawLiteral::from("x"), StopRawLiteral::from("y")],
+                body: Box::new(Statement::ReturnStatement {
+                    expr: Expression::InfixExpression {
+                        left: Box::new(Expression::IdentifierLiteral(StopRawLiteral::from("x"))),
+                        op: Operator::Splat,
+                        right: Box::new(Expression::IdentifierLiteral(StopRawLiteral::from("y"))),
+                    }
+                })
+            },
+            expected
+        );
+
+        // sum(x, y) { let a = x + y; return a; }
+        let expected = concat!(
+            "sum(x, y) {\n",
+            "let a = (x + y);\n",
+            "return a;\n",
+            "}",
+        );
+        test_expression(
+            Expression::FnLiteral {
+                ident: StopRawLiteral::from("sum"),
+                params: vec![StopRawLiteral::from("x"), StopRawLiteral::from("y")],
+                body: Box::new(Statement::BlockStatement {
+                    statements: vec![
+                        Box::new(Statement::LetStatement {
+                            ident: StopRawLiteral::from("a"),
+                            expr: Expression::InfixExpression {
+                                left: Box::new(Expression::IdentifierLiteral(StopRawLiteral::from("x"))),
+                                op: Operator::Plus,
+                                right: Box::new(Expression::IdentifierLiteral(StopRawLiteral::from("y"))),
+                            }
+                        }),
+                        Box::new(Statement::ReturnStatement {
+                            expr: Expression::IdentifierLiteral(StopRawLiteral::from("a")),
+                        })
+                    ]
+                })
+            },
+            expected);
     }
 
     fn test_expression(input: Expression, expected: &str) {
